@@ -1,0 +1,147 @@
+import { NextRequest, NextResponse } from "next/server";
+import type Stripe from "stripe";
+import { stripe, priceIdFor, UPSELL_SKU_BY_UI_ID } from "@/lib/stripe";
+import { createClient } from "@/lib/supabase/server";
+
+/**
+ * POST /api/upsell-charge
+ * Body: { upsell, analysisId }
+ *
+ * Off-session charge: uses the customer's saved default payment method (set
+ * during the initial subscription checkout) to charge the upsell amount
+ * without re-prompting for card details.
+ *
+ * Returns one of:
+ *   { success: true }                                — payment captured
+ *   { requiresAction: true, clientSecret, publishableKey } — 3DS challenge needed
+ *   { requiresCheckout: true }                       — no saved PM, fall back to /checkout
+ *   { error: string }                                — declined / failed
+ */
+export async function POST(req: NextRequest) {
+  if (!stripe) {
+    return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
+  }
+
+  const { upsell, analysisId } = (await req.json()) as {
+    upsell: keyof typeof UPSELL_SKU_BY_UI_ID;
+    analysisId?: string;
+  };
+
+  const sku = UPSELL_SKU_BY_UI_ID[upsell];
+  if (!sku) return NextResponse.json({ error: "Invalid upsell" }, { status: 400 });
+  if (!analysisId) {
+    return NextResponse.json({ error: "Missing analysisId" }, { status: 400 });
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+
+  // Verify the analysis belongs to this user (RLS would catch this too).
+  const { data: analysis } = await supabase
+    .from("analyses")
+    .select("id")
+    .eq("id", analysisId)
+    .maybeSingle();
+  if (!analysis) {
+    return NextResponse.json({ error: "Analysis not found" }, { status: 404 });
+  }
+
+  // Upsells are once-per-user. Don't allow a re-purchase regardless of which
+  // analysis they originally bought it against.
+  const { data: ownedAnalyses } = await supabase.from("analyses").select("id");
+  const ownedIds = (ownedAnalyses ?? []).map((a) => a.id);
+  if (ownedIds.length > 0) {
+    const { data: existingArt } = await supabase
+      .from("upsell_artifacts")
+      .select("id")
+      .eq("product_sku", sku)
+      .in("analysis_id", ownedIds)
+      .limit(1);
+    if (existingArt && existingArt.length > 0) {
+      return NextResponse.json({
+        alreadyOwned: true,
+        message: "You already own this add-on.",
+      });
+    }
+  }
+
+  // Find the Stripe customer that was created during subscription checkout.
+  const { data: subRow } = await supabase
+    .from("subscriptions")
+    .select("stripe_customer_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!subRow?.stripe_customer_id) {
+    return NextResponse.json({ requiresCheckout: true });
+  }
+
+  const customer = (await stripe.customers.retrieve(subRow.stripe_customer_id)) as Stripe.Customer;
+  const defaultPm =
+    typeof customer.invoice_settings?.default_payment_method === "string"
+      ? customer.invoice_settings.default_payment_method
+      : customer.invoice_settings?.default_payment_method?.id;
+
+  if (!defaultPm) {
+    // No saved payment method — send the client to the interactive checkout.
+    return NextResponse.json({ requiresCheckout: true });
+  }
+
+  const price = await stripe.prices.retrieve(priceIdFor(sku));
+  if (!price.unit_amount) {
+    return NextResponse.json({ error: "Price misconfigured" }, { status: 500 });
+  }
+
+  try {
+    const pi = await stripe.paymentIntents.create({
+      amount: price.unit_amount,
+      currency: price.currency,
+      customer: customer.id,
+      payment_method: defaultPm,
+      off_session: true,
+      confirm: true,
+      description: sku,
+      metadata: {
+        kind: "upsell",
+        product_sku: sku,
+        analysis_id: analysisId,
+        supabase_user_id: user.id,
+      },
+    });
+
+    if (pi.status === "succeeded") {
+      // Webhook will record the purchase + fire the pipeline. We can return
+      // optimistically since the metadata is intact.
+      return NextResponse.json({ success: true });
+    }
+    if (pi.status === "requires_action") {
+      return NextResponse.json({
+        requiresAction: true,
+        clientSecret: pi.client_secret,
+        publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+      });
+    }
+    return NextResponse.json(
+      { error: `Payment status: ${pi.status}` },
+      { status: 400 },
+    );
+  } catch (err) {
+    // Off-session charges raise an error with code 'authentication_required'
+    // when 3DS is required; the PI is attached.
+    const stripeErr = err as Stripe.errors.StripeError & {
+      payment_intent?: Stripe.PaymentIntent;
+    };
+    if (stripeErr.code === "authentication_required" && stripeErr.payment_intent) {
+      return NextResponse.json({
+        requiresAction: true,
+        clientSecret: stripeErr.payment_intent.client_secret,
+        publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+      });
+    }
+    return NextResponse.json(
+      { error: stripeErr.message ?? "Payment failed" },
+      { status: 400 },
+    );
+  }
+}

@@ -4,23 +4,27 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all duration-300 disabled:pointer-events-none disabled:opacity-50 cursor-pointer",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap font-semibold transition-all duration-200 disabled:pointer-events-none disabled:opacity-50 cursor-pointer select-none active:translate-y-[2px]",
   {
     variants: {
       variant: {
         primary:
-          "bg-[var(--color-gold)] text-[var(--color-bg-base)] hover:bg-[var(--color-gold-glow)] shadow-[0_4px_20px_-8px_rgba(201,169,97,0.5)]",
+          "bg-[var(--color-orange)] text-white hover:bg-[var(--color-orange-deep)] shadow-[var(--shadow-cta)] active:shadow-[var(--shadow-cta-active)]",
         secondary:
-          "bg-[var(--color-bg-elevated)] text-[var(--color-ivory)] border border-[var(--color-border-gold)] hover:border-[var(--color-gold)]",
-        ghost: "text-[var(--color-ivory)] hover:bg-[var(--color-bg-elevated)]",
+          "bg-white text-[var(--color-ink)] border-2 border-[var(--color-line-strong)] hover:border-[var(--color-orange)] hover:text-[var(--color-orange)]",
+        ghost:
+          "text-[var(--color-ink-soft)] hover:bg-[var(--color-bg-warm)] hover:text-[var(--color-ink)]",
         outline:
-          "border border-[var(--color-gold)] text-[var(--color-gold)] hover:bg-[var(--color-gold)] hover:text-[var(--color-bg-base)]",
+          "border-2 border-[var(--color-orange)] text-[var(--color-orange)] hover:bg-[var(--color-orange)] hover:text-white",
+        green:
+          "bg-[var(--color-green)] text-white hover:brightness-105 shadow-[0_4px_0_0_rgba(64,120,20,0.3)] active:shadow-[0_1px_0_0_rgba(64,120,20,0.3)]",
       },
       size: {
-        sm: "h-9 px-4 text-xs tracking-wide",
-        md: "h-11 px-6 text-sm tracking-wide",
-        lg: "h-14 px-10 text-base tracking-wider uppercase",
-        xl: "h-16 px-14 text-base tracking-wider uppercase",
+        sm: "h-10 px-4 text-sm rounded-[var(--radius-pill)]",
+        md: "h-12 px-6 text-base rounded-[var(--radius-pill)]",
+        lg: "h-14 px-8 text-base rounded-[var(--radius-pill)]",
+        xl: "h-16 px-10 text-lg rounded-[var(--radius-pill)]",
+        block: "h-14 w-full text-base rounded-[var(--radius-pill)]",
       },
     },
     defaultVariants: { variant: "primary", size: "md" },

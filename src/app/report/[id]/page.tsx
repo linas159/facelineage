@@ -1,170 +1,217 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import { FunnelShell } from "@/components/funnel-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-
-const REGIONS = [
-  { name: "Northern European", pct: 72, color: "from-[#c9a961] to-[#e8c77e]" },
-  { name: "Iberian", pct: 14, color: "from-[#8b6f47] to-[#c9a961]" },
-  { name: "Mediterranean", pct: 8, color: "from-[#7a9f6b] to-[#c9a961]" },
-  { name: "Central European", pct: 4, color: "from-[#8b6f47] to-[#b8533f]" },
-  { name: "Other", pct: 2, color: "from-[#4a4540] to-[#8b8478]" },
-];
-
-const UPSELLS = [
-  {
-    title: "Heritage Book",
-    desc: "300-page PDF deep-dive into your ancestral story, with AI-generated portraits of imagined ancestors and migration narratives.",
-    price: "$14.99",
-    cta: "Add to my report",
-  },
-  {
-    title: "Parents Comparison",
-    desc: "Upload your parents' photos to discover what features and heritage you inherited from each side.",
-    price: "$9.99",
-    cta: "Add my parents",
-  },
-  {
-    title: "Through The Ages",
-    desc: "AI portraits of you as a Roman senator, a Viking, a Tang dynasty noble, and 5 more historical eras.",
-    price: "$9.99",
-    cta: "Generate portraits",
-  },
-];
+import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
+import { EthnicityExplorer } from "@/components/report/ethnicity-explorer";
+import { GeneratingState } from "@/components/report/generating-state";
+import { loadReport } from "@/lib/report-loader";
 
 export default async function ReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const report = await loadReport(id);
+
+  if (report.status === "missing") {
+    redirect("/dashboard");
+  }
+
+  // Unpaid draft (e.g., the user navigated here via the dashboard before
+  // checking out). Send them to the paywall for this specific analysis.
+  if (report.status === "idle" && !report.isPaid) {
+    redirect(`/paywall?analysis=${id}`);
+  }
+
+  // In-flight: show the generating placeholder until polling sees `ready`.
+  // We also treat paid `idle` as in-flight here: covers the brief window
+  // between Stripe redirect and webhook touching the row.
+  if (
+    report.status === "idle" ||
+    report.status === "queued" ||
+    report.status === "running" ||
+    report.status === "failed"
+  ) {
+    const initialStatus =
+      report.status === "idle" ? "queued" : (report.status as "queued" | "running" | "failed");
+    return (
+      <FunnelShell>
+        <div className="pt-6 text-center">
+          <Chip color="orange" className="mb-4">Payment received</Chip>
+          <h1 className="mb-3 text-balance">
+            Your report is being composed.
+          </h1>
+          <p className="mx-auto mb-6 max-w-sm text-sm text-[var(--color-ink-soft)]">
+            Sit tight — we&apos;re reading your selfie, mapping your regions, and painting your ancestor portrait.
+          </p>
+        </div>
+        <GeneratingState
+          analysisId={id}
+          initialStatus={initialStatus}
+          initialError={report.errorMessage}
+        />
+      </FunnelShell>
+    );
+  }
+
+  // Ready (or demo) — render the full report
+  const {
+    conclusion,
+    heritageStory,
+    uniquenessScore,
+    regions,
+    facialTraits,
+    culturalInsights,
+    ancestor,
+  } = report;
 
   return (
     <FunnelShell>
-      <div className="pt-12 text-center">
-        <p className="mb-4 font-mono text-xs uppercase tracking-[0.3em] text-[var(--color-gold)]">
-          Report · {id}
-        </p>
-        <h1 className="mb-4 font-display text-4xl">Your face tells a story <em className="text-[var(--color-gold)]">12,000 years</em> in the making</h1>
-        <p className="mx-auto mb-16 max-w-xl text-[var(--color-ivory-muted)]">
-          Below, the heritage written into your features — region by region, story by story.
+      {/* ─────────── HERO ─────────── */}
+      <div className="pt-6 text-center">
+        <Chip color="green" className="mb-4">Report complete</Chip>
+        <h1 className="mb-3 text-balance">
+          Your face tells a story <span className="text-[var(--color-orange)]">12,000 years</span> in the making.
+        </h1>
+        <p className="mx-auto mb-6 max-w-sm text-sm text-[var(--color-ink-soft)]">
+          Here&apos;s the heritage written into your features.
         </p>
       </div>
 
-      {/* Ethnicity breakdown */}
-      <Card className="mb-8">
-        <CardTitle className="mb-2">Heritage breakdown</CardTitle>
-        <CardDescription className="mb-8">
-          Your face matched these populations across our 94-region database.
-        </CardDescription>
-        <div className="space-y-5">
-          {REGIONS.map((r) => (
-            <div key={r.name}>
-              <div className="mb-2 flex items-baseline justify-between">
-                <span className="font-display text-xl text-[var(--color-ivory)]">{r.name}</span>
-                <span className="font-mono text-2xl tabular text-[var(--color-gold)]">{r.pct}%</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-[var(--color-border-subtle)]">
-                <div className={`h-full bg-gradient-to-r ${r.color}`} style={{ width: `${r.pct}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
+      {/* ─────────── ETHNICITY CONCLUSION ─────────── */}
+      <Card className="mb-5 bg-[var(--color-orange-pale)]">
+        <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
+          Conclusion
+        </p>
+        <CardTitle className="mb-2">Your heritage at a glance</CardTitle>
+        <CardDescription>{conclusion}</CardDescription>
       </Card>
 
-      {/* World map placeholder */}
-      <Card className="mb-8">
-        <CardTitle className="mb-2">Migration map</CardTitle>
-        <CardDescription className="mb-6">
-          The journey your ancestors took across millennia.
-        </CardDescription>
-        <div className="aspect-[2/1] rounded-[var(--radius-md)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] p-4">
-          <div className="flex h-full items-center justify-center font-mono text-xs text-[var(--color-muted)]">
-            [ react-simple-maps + animated migration arcs go here ]
+      {/* ─────────── PIE CHART + MAP + DETAIL ─────────── */}
+      <EthnicityExplorer regions={regions} />
+
+      {/* ─────────── FACIAL TRAITS ─────────── */}
+      <section className="mt-8">
+        <p className="mb-1 text-center text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
+          Facial traits
+        </p>
+        <h2 className="mb-4 text-center text-2xl">Six features, six clues</h2>
+        <div className="space-y-4">
+          {facialTraits.map((t) => (
+            <Card key={t.key} className="!p-5">
+              <div className="mb-3 flex items-center gap-4">
+                {t.imageSrc && (
+                  <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-[var(--radius-input)] bg-[var(--color-bg-warm)]">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={t.imageSrc} alt={t.name} className="h-full w-full object-cover" />
+                  </div>
+                )}
+                <div>
+                  <CardTitle className="text-lg">{t.name}</CardTitle>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {t.supportingRegions.map((iso) => (
+                      <span
+                        key={iso}
+                        className="rounded-full bg-[var(--color-orange-pale)] px-2 py-0.5 text-[10px] font-bold tracking-wide text-[var(--color-orange-deep)]"
+                      >
+                        {iso.toUpperCase()}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <CardDescription>{t.description}</CardDescription>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      {/* ─────────── ANCESTOR PORTRAIT ─────────── */}
+      <section className="mt-8">
+        <p className="mb-1 text-center text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
+          Your ancestor
+        </p>
+        <h2 className="mb-4 text-center text-2xl">A face from your line</h2>
+        <Card className="overflow-hidden !p-0">
+          <div className="relative aspect-[4/5] w-full overflow-hidden bg-[var(--color-bg-warm)]">
+            {ancestor.imageSrc && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={ancestor.imageSrc}
+                alt={`Ancestor portrait — ${ancestor.name}`}
+                className="h-full w-full object-cover"
+              />
+            )}
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent p-5 text-white">
+              <p className="font-display text-xl font-bold leading-tight">{ancestor.name}</p>
+              <p className="mt-1 text-xs uppercase tracking-wider opacity-90">
+                {ancestor.era} · {ancestor.place}
+              </p>
+            </div>
           </div>
-        </div>
-      </Card>
+          <div className="p-5">
+            <CardDescription>{ancestor.description}</CardDescription>
+          </div>
+        </Card>
+      </section>
 
-      {/* Heritage story */}
-      <Card className="mb-8">
-        <CardTitle className="mb-2">Your heritage story</CardTitle>
-        <CardDescription className="mb-6">
-          A narrative woven from your strongest matches, generated by Claude.
+      {/* ─────────── CULTURAL INSIGHTS ─────────── */}
+      <section className="mt-8">
+        <p className="mb-1 text-center text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
+          Cultural insights
+        </p>
+        <h2 className="mb-4 text-center text-2xl">Where your face feels at home</h2>
+        <div className="space-y-4">
+          {culturalInsights.map((c) => (
+            <Card key={c.key} className={c.imageSrc ? "overflow-hidden !p-0" : ""}>
+              {c.imageSrc && (
+                <div className="aspect-[16/9] w-full overflow-hidden bg-[var(--color-bg-warm)]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={c.imageSrc} alt={c.name} className="h-full w-full object-cover" />
+                </div>
+              )}
+              <div className={c.imageSrc ? "p-5" : ""}>
+                <CardTitle className="mb-2 text-lg">{c.name}</CardTitle>
+                <CardDescription>{c.description}</CardDescription>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      {/* ─────────── HERITAGE STORY ─────────── */}
+      <Card className="mt-8">
+        <CardTitle className="mb-1">Your heritage story</CardTitle>
+        <CardDescription className="mb-4">
+          A narrative woven from your strongest matches.
         </CardDescription>
-        <p className="font-display text-lg leading-relaxed text-[var(--color-ivory-muted)]">
-          <span className="float-left mr-2 font-display text-6xl leading-none text-[var(--color-gold)]">Y</span>
-          our ancestors walked the windswept coasts of the North Sea, fished the
-          fjords of Scandinavia, and tended farms in the rolling hills of
-          northern Europe. Threaded through this lineage, you carry whispers of
-          Iberian warmth and Mediterranean sun — markers of distant journeys and
-          ancient unions...
-          <span className="text-[var(--color-muted)]"> [Claude-generated narrative continues — 1,200+ words]</span>
+        <p className="text-base leading-relaxed text-[var(--color-ink-soft)]">
+          <span className="float-left mr-2 font-display text-5xl leading-[0.85] text-[var(--color-orange)]">
+            {heritageStory.charAt(0)}
+          </span>
+          {heritageStory.slice(1)}
         </p>
       </Card>
 
-      {/* First upsell */}
-      <UpsellCard upsell={UPSELLS[0]} />
-
-      {/* Cultural ties */}
-      <Card className="mb-8">
-        <CardTitle className="mb-2">Cultural ties</CardTitle>
-        <CardDescription className="mb-6">
-          Cuisine, art, music, and language fragments tied to your heritage.
-        </CardDescription>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          {["Cuisine", "Music", "Language", "Festivals"].map((t) => (
-            <div key={t} className="rounded-[var(--radius-md)] border border-[var(--color-border-subtle)] p-4 text-center">
-              <p className="font-display text-sm text-[var(--color-gold)]">{t}</p>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Second upsell */}
-      <UpsellCard upsell={UPSELLS[1]} />
-
-      {/* Facial features decoded */}
-      <Card className="mb-8">
-        <CardTitle className="mb-2">Facial features decoded</CardTitle>
-        <CardDescription className="mb-6">
-          What each of your features says about your origins.
-        </CardDescription>
-        <ul className="space-y-3 text-sm text-[var(--color-ivory-muted)]">
-          <li>• Your facial structure is consistent with Northern European populations</li>
-          <li>• Your eye color is most common in Baltic & Nordic regions</li>
-          <li>• Your jaw shape suggests Iberian admixture</li>
-        </ul>
-      </Card>
-
-      {/* Uniqueness */}
-      <Card className="mb-8 text-center">
-        <CardTitle className="mb-2">Uniqueness index</CardTitle>
-        <p className="my-6 font-display text-7xl text-[var(--color-gold)]">87<span className="text-3xl">/100</span></p>
+      {/* ─────────── UNIQUENESS SCORE ─────────── */}
+      <Card className="mt-5 text-center">
+        <CardTitle>Facial uniqueness score</CardTitle>
+        <p className="my-4 font-display text-6xl font-bold text-[var(--color-green)] tabular">
+          {uniquenessScore}
+          <span className="text-2xl">/100</span>
+        </p>
         <CardDescription>
-          Your combination of features is rarer than 87% of analyses we&apos;ve run.
+          Your combination of features is rarer than {uniquenessScore}% of analyses we&apos;ve run.
         </CardDescription>
       </Card>
 
-      {/* Third upsell */}
-      <UpsellCard upsell={UPSELLS[2]} />
-
-      {/* Share + download */}
-      <div className="mt-12 flex flex-wrap items-center justify-center gap-4">
-        <Button variant="secondary">↓ Download PDF</Button>
-        <Button>Share my result</Button>
+      {/* ─────────── SHARE / DOWNLOAD ─────────── */}
+      <div className="mt-8 flex flex-col gap-3">
+        <Button size="block">Share my result</Button>
+        <Button size="block" variant="secondary">Download PDF</Button>
+        <Link href="/dashboard">
+          <Button size="block" variant="ghost">Back to my reports</Button>
+        </Link>
       </div>
+
     </FunnelShell>
-  );
-}
-
-function UpsellCard({ upsell }: { upsell: { title: string; desc: string; price: string; cta: string } }) {
-  return (
-    <div className="my-10 rounded-[var(--radius-xl)] border border-[var(--color-gold)] bg-gradient-to-br from-[var(--color-bg-warm)] to-[var(--color-bg-elevated)] p-8 shadow-[0_8px_40px_-16px_rgba(201,169,97,0.3)]">
-      <div className="flex items-start justify-between gap-6">
-        <div className="flex-1">
-          <p className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-[var(--color-gold)]">
-            Go deeper · {upsell.price}
-          </p>
-          <h3 className="mb-3 font-display text-2xl text-[var(--color-ivory)]">{upsell.title}</h3>
-          <p className="text-sm leading-relaxed text-[var(--color-ivory-muted)]">{upsell.desc}</p>
-        </div>
-        <Button>{upsell.cta}</Button>
-      </div>
-    </div>
   );
 }

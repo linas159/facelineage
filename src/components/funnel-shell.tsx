@@ -1,37 +1,79 @@
 import Link from "next/link";
 import { Logo } from "@/components/brand/logo";
+import { cn } from "@/lib/utils";
 
 interface FunnelShellProps {
   children: React.ReactNode;
   step?: number;
   totalSteps?: number;
+  showBack?: boolean;
+  backHref?: string;
+  /** When true, the shell takes exactly one viewport height (no scroll) and
+   *  the content area becomes a flex column that distributes its children. */
+  fillViewport?: boolean;
 }
 
 /**
- * Shared layout chrome for funnel pages — minimal nav + optional progress.
+ * Shared mobile-first chrome for funnel pages.
+ * Phone-sized canvas with optional progress bar at top.
  */
-export function FunnelShell({ children, step, totalSteps }: FunnelShellProps) {
+export function FunnelShell({
+  children,
+  step,
+  totalSteps,
+  showBack = false,
+  backHref,
+  fillViewport = false,
+}: FunnelShellProps) {
   return (
-    <main className="relative min-h-screen bg-[var(--color-bg-base)]">
-      <header className="mx-auto flex max-w-3xl items-center justify-between px-6 py-6">
-        <Link href="/">
-          <Logo className="h-7" />
-        </Link>
-        {step && totalSteps && (
-          <div className="flex items-center gap-3">
-            <div className="h-1 w-32 overflow-hidden rounded-full bg-[var(--color-border-subtle)]">
-              <div
-                className="h-full bg-[var(--color-gold)] transition-all duration-500"
-                style={{ width: `${(step / totalSteps) * 100}%` }}
-              />
+    <main
+      className={cn(
+        "relative bg-[var(--color-bg-base)]",
+        fillViewport ? "flex h-[100dvh] flex-col overflow-hidden" : "min-h-[100dvh]",
+      )}
+    >
+      <header className="z-30 bg-[var(--color-bg-base)]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-md items-center justify-between px-5 py-4">
+          {showBack ? (
+            <Link
+              href={backHref ?? "#"}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[var(--shadow-chip)] text-[var(--color-ink-soft)]"
+              aria-label="Back"
+            >
+              ←
+            </Link>
+          ) : (
+            <Link href="/">
+              <Logo className="h-10" />
+            </Link>
+          )}
+
+          {step && totalSteps && (
+            <div className="flex flex-1 items-center justify-end gap-3 pl-4">
+              <div className="h-2 flex-1 max-w-[140px] overflow-hidden rounded-full bg-[var(--color-line)]">
+                <div
+                  className="h-full bg-[var(--color-orange)] transition-all duration-500"
+                  style={{ width: `${(step / totalSteps) * 100}%` }}
+                />
+              </div>
+              <span className="font-semibold text-xs text-[var(--color-ink-muted)] tabular">
+                {step}/{totalSteps}
+              </span>
             </div>
-            <span className="font-mono text-xs text-[var(--color-muted)]">
-              {step} / {totalSteps}
-            </span>
-          </div>
-        )}
+          )}
+        </div>
       </header>
-      <div className="mx-auto max-w-3xl px-6 pb-24">{children}</div>
+
+      <div
+        className={cn(
+          "mx-auto w-full max-w-md px-5",
+          fillViewport
+            ? "flex min-h-0 flex-1 flex-col pb-[max(env(safe-area-inset-bottom),16px)]"
+            : "pb-12",
+        )}
+      >
+        {children}
+      </div>
     </main>
   );
 }

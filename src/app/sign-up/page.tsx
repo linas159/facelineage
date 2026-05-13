@@ -1,57 +1,76 @@
 import Link from "next/link";
 import { FunnelShell } from "@/components/funnel-shell";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { createClient } from "@/lib/supabase/server";
+import { SignUpForm } from "./sign-up-form";
 
-export default function SignUpPage() {
+export const dynamic = "force-dynamic";
+
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string; error?: string }>;
+}) {
+  const params = await searchParams;
+  const next = params.next ?? "/dashboard";
+
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+
+  if (user) {
+    // Already signed in — let them continue OR sign out to use a different
+    // account. No silent redirect (used to be the bug that locked you out).
+    return (
+      <FunnelShell>
+        <div className="pt-8 text-center">
+          <h1 className="mb-3 text-balance">You&apos;re already signed in</h1>
+          <p className="mx-auto mb-8 max-w-sm text-base leading-relaxed text-[var(--color-ink-soft)]">
+            Signed in as <span className="font-semibold">{user.email}</span>.
+          </p>
+        </div>
+
+        <Card className="flex flex-col gap-4">
+          <Link href={next}>
+            <Button size="block">Continue to dashboard →</Button>
+          </Link>
+          <form action={`/auth/signout?next=/sign-up`} method="post">
+            <Button size="block" variant="secondary" type="submit">
+              Sign out and use a different email
+            </Button>
+          </form>
+        </Card>
+      </FunnelShell>
+    );
+  }
+
   return (
     <FunnelShell>
-      <div className="pt-16 text-center">
-        <h1 className="mb-4 font-display text-4xl">Save your report</h1>
-        <p className="mx-auto mb-12 max-w-sm text-[var(--color-ivory-muted)]">
-          Create a free account to unlock and revisit your heritage report anytime.
+      <div className="pt-8 text-center">
+        <h1 className="mb-3 text-balance">Sign in to Facelineage</h1>
+        <p className="mx-auto mb-8 max-w-sm text-base leading-relaxed text-[var(--color-ink-soft)]">
+          Enter the email you used at checkout — we&apos;ll send you a one-tap sign-in link.
         </p>
       </div>
 
-      <Card className="mx-auto max-w-md">
-        <div className="space-y-4">
-          <Button variant="secondary" className="w-full">
-            <span className="mr-2"></span>
-            Continue with Apple
-          </Button>
-          <Button variant="secondary" className="w-full">
-            <span className="mr-2">G</span>
-            Continue with Google
-          </Button>
-
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-[var(--color-border-subtle)]" />
-            </div>
-            <div className="relative flex justify-center text-xs">
-              <span className="bg-[var(--color-bg-elevated)] px-3 font-mono uppercase tracking-wider text-[var(--color-muted)]">
-                or with email
-              </span>
-            </div>
-          </div>
-
-          <input
-            type="email"
-            placeholder="you@example.com"
-            className="h-12 w-full rounded-[var(--radius-md)] border border-[var(--color-border-subtle)] bg-[var(--color-bg-base)] px-4 text-sm text-[var(--color-ivory)] placeholder:text-[var(--color-muted)] focus:border-[var(--color-gold)] focus:outline-none"
-          />
-          <Link href="/paywall" className="block">
-            <Button className="w-full" size="lg">Send magic link</Button>
-          </Link>
-        </div>
+      <Card>
+        <SignUpForm next={next} />
       </Card>
 
-      <p className="mt-8 text-center text-xs text-[var(--color-muted)]">
-        By continuing you agree to our{" "}
-        <Link href="/terms" className="underline hover:text-[var(--color-gold)]">Terms</Link>{" "}
-        and{" "}
-        <Link href="/privacy" className="underline hover:text-[var(--color-gold)]">Privacy Policy</Link>.
+      {params.error && (
+        <p className="mt-4 text-center text-xs text-[var(--color-coral)]">
+          {decodeURIComponent(params.error)}
+        </p>
+      )}
+
+      <p className="mt-6 text-center text-xs leading-relaxed text-[var(--color-ink-muted)]">
+        New here?{" "}
+        <Link href="/" className="underline hover:text-[var(--color-orange)]">
+          Take the quiz to start a report
+        </Link>
+        .
       </p>
     </FunnelShell>
   );
 }
+
