@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import type Stripe from "stripe";
 import { stripe, priceIdFor, PLANS, type PlanKey } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
@@ -6,6 +7,10 @@ import { runMainPipeline, runUpsellPipeline, type UpsellSku } from "@/lib/ai/pip
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// Keep the function alive for up to 60s after the response is sent so the
+// `after()` callbacks below (AI pipelines) can finish. 60s is the max on
+// Vercel Hobby; Pro allows up to 300s.
+export const maxDuration = 60;
 
 /**
  * POST /api/webhooks/stripe
@@ -184,8 +189,16 @@ async function handleIntroFeePaid(
       .update({ is_paid: true, generation_status: "queued" })
       .eq("id", analysisId);
 
-    runMainPipeline(analysisId).catch((err) => {
-      console.error(`Main pipeline failed for analysis ${analysisId}:`, err);
+    // Run after the response is sent so Stripe doesn't time out on us,
+    // but inside the same function invocation so Vercel doesn't kill us.
+    after(async () => {
+      console.log(`[after] Starting main pipeline for analysis=${analysisId}`);
+      try {
+        await runMainPipeline(analysisId);
+        console.log(`[after] Main pipeline complete for analysis=${analysisId}`);
+      } catch (err) {
+        console.error(`[after] Main pipeline failed for analysis=${analysisId}:`, err);
+      }
     });
   }
 }
@@ -218,8 +231,13 @@ async function handleUpsellPaid(
   }
 
   console.log(`Firing upsell pipeline: sku=${sku} analysis=${analysisId} purchase=${purchaseId}`);
-  runUpsellPipeline({ sku, analysisId, purchaseId }).catch((err) => {
-    console.error(`Upsell pipeline failed for ${sku} on analysis ${analysisId}:`, err);
+  after(async () => {
+    try {
+      await runUpsellPipeline({ sku, analysisId, purchaseId });
+      console.log(`[after] Upsell pipeline complete sku=${sku} analysis=${analysisId}`);
+    } catch (err) {
+      console.error(`[after] Upsell pipeline failed for ${sku} on analysis ${analysisId}:`, err);
+    }
   });
 }
 
