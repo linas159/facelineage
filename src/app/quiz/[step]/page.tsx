@@ -30,9 +30,9 @@ const QUIZ_STEPS: Step[] = [
     key: "gender",
     q: "What gender do you identify as?",
     options: [
-      { label: "Female", emoji: "♀" },
-      { label: "Male",   emoji: "♂" },
-      { label: "Other",  emoji: "⚧" },
+      { label: "Female", emoji: "♀", iconSrc: "/quiz/q1-female.svg" },
+      { label: "Male",   emoji: "♂", iconSrc: "/quiz/q1-male.svg" },
+      { label: "Other",  emoji: "⚧", iconSrc: "/quiz/q1-other.svg" },
     ],
   },
 

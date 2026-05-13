@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { loadStripe } from "@stripe/stripe-js";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
@@ -166,6 +167,7 @@ export function UpsellSections({
   analysisId,
   className,
 }: UpsellSectionsProps) {
+  const router = useRouter();
   const [busy, setBusy] = useState<UpsellId | null>(null);
   const [purchased, setPurchased] = useState<Partial<Record<UpsellId, boolean>>>({});
   const [errors, setErrors] = useState<Partial<Record<UpsellId, string>>>({});
@@ -182,6 +184,10 @@ export function UpsellSections({
     const result = await chargeUpsell(id, analysisId);
     if (result === "success") {
       setPurchased((p) => ({ ...p, [id]: true }));
+      // Re-render the server component so the buy card disappears and the
+      // owned-state UI (download / upload prompt / generating) takes its
+      // place — no manual refresh needed.
+      router.refresh();
     } else if (result === "checkout") {
       window.location.href = `/checkout?upsell=${id}&analysis=${analysisId}`;
       return;

@@ -5,7 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { EthnicityExplorer } from "@/components/report/ethnicity-explorer";
 import { GeneratingState } from "@/components/report/generating-state";
+import { UpsellPopupSequence, type UpsellId } from "@/components/upsell-sections";
 import { loadReport } from "@/lib/report-loader";
+import type { UpsellSku } from "@/lib/report-loader";
+
+const SKU_TO_UI_ID: Record<UpsellSku, UpsellId> = {
+  upsell_v2_parents: "parents",
+  upsell_v2_ethnicity: "ethnicity",
+  upsell_v2_ages: "ages",
+  upsell_v2_partner: "partner",
+  upsell_v2_book: "book",
+};
 
 export default async function ReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -212,6 +222,21 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
         </Link>
       </div>
 
+      {/* Upsell popup sequence — fires when the user scrolls near the bottom.
+          Filtered to SKUs the user hasn't already purchased. */}
+      {report.status !== "demo" && (
+        <UpsellPopupSequence
+          analysisId={id}
+          ids={
+            (["parents", "ethnicity", "ages", "partner", "book"] as UpsellId[]).filter((uiId) => {
+              const sku = (Object.keys(SKU_TO_UI_ID) as UpsellSku[]).find(
+                (s) => SKU_TO_UI_ID[s] === uiId,
+              );
+              return sku ? !(report.upsells[sku] && report.upsells[sku]!.length > 0) : true;
+            })
+          }
+        />
+      )}
     </FunnelShell>
   );
 }

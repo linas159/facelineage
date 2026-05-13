@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 type Option = {
@@ -24,6 +25,12 @@ const STORAGE_KEY = "fl_quiz_answers";
  */
 export function QuizOptions({ questionKey, options, nextHref }: QuizOptionsProps) {
   const router = useRouter();
+
+  // Warm up the next route while the user is still picking — kills the
+  // "click, wait 800ms, see new page" feeling on Vercel.
+  useEffect(() => {
+    router.prefetch(nextHref);
+  }, [router, nextHref]);
 
   function record(label: string) {
     try {
