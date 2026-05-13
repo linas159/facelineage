@@ -7,10 +7,10 @@ import { runMainPipeline, runUpsellPipeline, type UpsellSku } from "@/lib/ai/pip
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-// Keep the function alive for up to 60s after the response is sent so the
-// `after()` callbacks below (AI pipelines) can finish. 60s is the max on
-// Vercel Hobby; Pro allows up to 300s.
-export const maxDuration = 60;
+// Keep the function alive after the response is sent so the `after()`
+// callbacks below (AI pipelines) can finish. Pro plan allows up to 300s;
+// keep at 60s if you're still on Hobby (and expect timeouts).
+export const maxDuration = 300;
 
 /**
  * POST /api/webhooks/stripe
