@@ -385,12 +385,11 @@ export function UpsellPopupSequence({
 
     if (result === "success") {
       setConfirmedUpsell(upsellRef);
-      // Auto-advance after a short pause; user can also tap Continue
-      // (handled inside ConfirmationModal below).
+      // Auto-advance after 5s if the user doesn't tap Continue first.
       setTimeout(() => {
         setConfirmedUpsell((c) => (c?.id === id ? null : c));
         setStep((s) => s + 1);
-      }, 1800);
+      }, 5000);
       return;
     }
 
