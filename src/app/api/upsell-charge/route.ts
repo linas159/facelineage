@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
   // Find the Stripe customer that was created during subscription checkout.
   const { data: subRow } = await supabase
     .from("subscriptions")
-    .select("stripe_customer_id")
+    .select("stripe_customer_id, stripe_subscription_id")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -78,13 +78,33 @@ export async function POST(req: NextRequest) {
   }
 
   const customer = (await stripe.customers.retrieve(subRow.stripe_customer_id)) as Stripe.Customer;
-  const defaultPm =
+  let defaultPm =
     typeof customer.invoice_settings?.default_payment_method === "string"
       ? customer.invoice_settings.default_payment_method
       : customer.invoice_settings?.default_payment_method?.id;
 
+  // Fallback for users who paid before the webhook started mirroring the PM
+  // onto the customer: look at the subscription's default_payment_method.
+  if (!defaultPm && subRow.stripe_subscription_id) {
+    try {
+      const sub = await stripe.subscriptions.retrieve(subRow.stripe_subscription_id);
+      const subPm =
+        typeof sub.default_payment_method === "string"
+          ? sub.default_payment_method
+          : sub.default_payment_method?.id;
+      if (subPm) {
+        defaultPm = subPm;
+        // Mirror it onto the customer so future upsells skip this lookup.
+        await stripe.customers.update(customer.id, {
+          invoice_settings: { default_payment_method: subPm },
+        });
+      }
+    } catch {
+      // ignore — fall through to requiresCheckout
+    }
+  }
+
   if (!defaultPm) {
-    // No saved payment method — send the client to the interactive checkout.
     return NextResponse.json({ requiresCheckout: true });
   }
 

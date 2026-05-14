@@ -238,10 +238,14 @@ async function handleInvoicePaid(
   }
   console.log(`[invoice.paid] userId=${userId}`);
 
-  // 3. Backfill email + supabase id on the customer.
+  // 3. Backfill email + supabase id on the customer, AND set the winning
+  // PaymentMethod as the customer's default. `save_default_payment_method:
+  // "on_subscription"` only sets the PM on the subscription — without this
+  // mirror to the customer, off-session upsell charges can't find it.
   await stripe.customers.update(customerId, {
     email,
     metadata: { source: "facelineage_checkout", supabase_user_id: userId },
+    invoice_settings: { default_payment_method: pmId },
   });
 
   // 4. Persist the live subscription row.
