@@ -267,7 +267,10 @@ function ExpressSection({ redirectTarget }: { redirectTarget: string }) {
           amazonPay: "never",
           klarna: "never",
         },
-        layout: { maxColumns: 1, maxRows: 4, overflow: "never" },
+        // maxRows:0 means unlimited rows. Stripe requires this when
+        // overflow:"never" — otherwise it throws and the whole element
+        // crashes (no wallets render at all).
+        layout: { maxColumns: 1, maxRows: 0, overflow: "never" },
         paymentMethodOrder: ["googlePay", "applePay", "paypal", "link"],
         buttonHeight: 48,
       }}
