@@ -23,6 +23,7 @@ const GENERATED_BUCKET = "generated";
  * of a hung "loading…".
  */
 export async function runMainPipeline(analysisId: string): Promise<void> {
+  console.log(`[pipeline] start analysis=${analysisId}`);
   const db = createServiceClient();
 
   const { data: row, error } = await db
@@ -30,11 +31,12 @@ export async function runMainPipeline(analysisId: string): Promise<void> {
     .select("id, user_id, photo_path, generation_status, quiz_answers, timezone, country_hint")
     .eq("id", analysisId)
     .single();
+  console.log(`[pipeline] loaded row, photo_path=${row?.photo_path ?? "(none)"} status=${row?.generation_status}`);
   if (error || !row) throw new Error(`Analysis ${analysisId} not found: ${error?.message}`);
   if (!row.photo_path) throw new Error(`Analysis ${analysisId} has no photo_path`);
 
-  // Idempotency: don't rerun if we already generated.
   if (row.generation_status === "ready" || row.generation_status === "running") {
+    console.log(`[pipeline] already ${row.generation_status} — skipping`);
     return;
   }
 
@@ -42,13 +44,17 @@ export async function runMainPipeline(analysisId: string): Promise<void> {
     .from("analyses")
     .update({ generation_status: "running", generation_error: null })
     .eq("id", analysisId);
+  console.log(`[pipeline] status → running`);
 
   try {
     // 1. Pull selfie bytes
     const selfie = await downloadFromStorage(db, PHOTOS_BUCKET, row.photo_path);
     const selfieBase64 = selfie.bytes.toString("base64");
+    console.log(`[pipeline] selfie downloaded, ${selfie.bytes.length} bytes`);
 
     // 2. Run Claude analysis with quiz + location context
+    console.log(`[pipeline] calling Claude…`);
+    const claudeStart = Date.now();
     const result = await analyzeFace({
       imageBase64: selfieBase64,
       mediaType: selfie.mediaType,
@@ -58,41 +64,40 @@ export async function runMainPipeline(analysisId: string): Promise<void> {
         quizAnswers: (row.quiz_answers as Record<string, string> | null) ?? null,
       },
     });
+    console.log(`[pipeline] Claude done in ${Date.now() - claudeStart}ms, regions=${result.regions.length}`);
 
-    // 3. Generate ancestor portrait + 1 cultural insight image per insight,
-    //    Only the ancestor portrait is generated per-user (high impact,
-    //    1 image). Cultural insights ship text-only for now — generating
-    //    3 images per report multiplies cost without a clear win. We'll
-    //    swap in a pre-generated library matched by region later.
     const userId = row.user_id ?? "shared";
 
+    console.log(`[pipeline] generating ancestor portrait…`);
+    const imgStart = Date.now();
     const ancestorBytes = await generateImage({
       prompt: result.ancestor.image_prompt,
       referenceImageBase64: selfieBase64,
       referenceMediaType: selfie.mediaType,
       aspect: "4:5",
     });
+    console.log(`[pipeline] portrait done in ${Date.now() - imgStart}ms, ${ancestorBytes.length} bytes`);
 
     // 4. Upload generated images
+    console.log(`[pipeline] uploading portrait…`);
     const ancestorPath = await uploadGenerated(
       db,
       `${userId}/${analysisId}/ancestor-${randomUUID()}.png`,
       ancestorBytes,
     );
+    console.log(`[pipeline] portrait uploaded → ${ancestorPath}`);
 
-    // Persist cultural insights without an image_path; the renderer hides
-    // the image block when none is set.
     const insightsWithPaths = result.cultural_insights.map((ci) => ({
       ...ci,
       image_path: null,
     }));
 
-    // 5. Persist everything to the analysis row
     const persistAncestor = {
       ...result.ancestor,
       image_path: ancestorPath,
     };
 
+    console.log(`[pipeline] persisting analysis row…`);
     const { error: upErr } = await db
       .from("analyses")
       .update({
@@ -111,8 +116,11 @@ export async function runMainPipeline(analysisId: string): Promise<void> {
       .eq("id", analysisId);
 
     if (upErr) throw upErr;
+    console.log(`[pipeline] DONE analysis=${analysisId}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error(`[pipeline] FAILED analysis=${analysisId}: ${message}`);
+    if (err instanceof Error && err.stack) console.error(err.stack);
     await db
       .from("analyses")
       .update({ generation_status: "failed", generation_error: message })
