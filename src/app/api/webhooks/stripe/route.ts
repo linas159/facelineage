@@ -144,25 +144,57 @@ async function handleInvoicePaid(
   const plan = md.plan as PlanKey | undefined;
   const analysisId = md.analysis_id;
   const siblingSubId = md.sibling_subscription_id;
-  if (!plan || !PLANS[plan]) return;
+  if (!plan || !PLANS[plan]) {
+    console.log(`[invoice.paid] missing/invalid plan in metadata — skipping`);
+    return;
+  }
+  console.log(`[invoice.paid] plan=${plan} analysisId=${analysisId}`);
 
   // 1. Get the PaymentMethod + email from the invoice's PaymentIntent.
-  const piId =
-    typeof invoice.payment_intent === "string"
-      ? invoice.payment_intent
-      : invoice.payment_intent?.id;
-  if (!piId) return;
+  // API 2024-12-18.acacia moved this — try legacy then new `payments[*]`.
+  let piId: string | undefined;
+  const legacyPi = invoice.payment_intent;
+  if (typeof legacyPi === "string") piId = legacyPi;
+  else if (legacyPi && typeof legacyPi === "object") piId = legacyPi.id;
+
+  if (!piId) {
+    // Re-fetch the invoice with payments expanded; some webhook payloads
+    // omit the payments array even on the new schema.
+    const full = (await stripe.invoices.retrieve(invoice.id!, {
+      expand: ["payments"],
+    })) as unknown as {
+      payments?: Array<{
+        payment?: { payment_intent?: string | { id: string } | null };
+      }>;
+    };
+    for (const p of full.payments ?? []) {
+      const ref = p.payment?.payment_intent;
+      if (!ref) continue;
+      piId = typeof ref === "string" ? ref : ref.id;
+      if (piId) break;
+    }
+  }
+
+  console.log(`[invoice.paid] piId=${piId ?? "(none)"}`);
+  if (!piId) {
+    console.error(`[invoice.paid] no PaymentIntent found on invoice ${invoice.id}`);
+    return;
+  }
+
   const pi = await stripe.paymentIntents.retrieve(piId);
   const pmId =
     typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
   if (!pmId) {
-    console.error(`invoice.paid ${invoice.id}: no payment_method on PI`);
+    console.error(`[invoice.paid] no payment_method on PI ${piId}`);
     return;
   }
+  console.log(`[invoice.paid] pmId=${pmId}`);
+
   const pm = await stripe.paymentMethods.retrieve(pmId);
   const email = pm.billing_details?.email ?? pi.receipt_email ?? undefined;
+  console.log(`[invoice.paid] email=${email ?? "(none)"}`);
   if (!email) {
-    console.error(`invoice.paid ${invoice.id}: no email in billing_details`);
+    console.error(`[invoice.paid] no email in billing_details`);
     return;
   }
 
@@ -186,7 +218,11 @@ async function handleInvoicePaid(
     });
     if (created?.user) userId = created.user.id;
   }
-  if (!userId) return;
+  if (!userId) {
+    console.error(`[invoice.paid] failed to provision Supabase user for ${email}`);
+    return;
+  }
+  console.log(`[invoice.paid] userId=${userId}`);
 
   // 3. Backfill email + supabase id on the customer.
   await stripe.customers.update(customerId, {
@@ -248,10 +284,15 @@ async function handleInvoicePaid(
 
   // 7. Mark analysis paid + fire the AI pipeline asynchronously.
   if (analysisId) {
-    await db
+    const { error: updErr } = await db
       .from("analyses")
       .update({ is_paid: true, generation_status: "queued" })
       .eq("id", analysisId);
+    if (updErr) {
+      console.error(`[invoice.paid] failed to mark analysis paid:`, updErr);
+    } else {
+      console.log(`[invoice.paid] analysis ${analysisId} marked paid + queued`);
+    }
 
     after(async () => {
       console.log(`[after] Starting main pipeline for analysis=${analysisId}`);
@@ -262,6 +303,8 @@ async function handleInvoicePaid(
         console.error(`[after] Main pipeline failed for analysis=${analysisId}:`, err);
       }
     });
+  } else {
+    console.log(`[invoice.paid] no analysisId in metadata — skipping pipeline`);
   }
 }
 
