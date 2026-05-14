@@ -102,13 +102,34 @@ async function handleInvoicePaid(
   invoice: Stripe.Invoice,
   db: ReturnType<typeof createServiceClient>,
 ) {
-  console.log(`[invoice.paid] invoice=${invoice.id} subscription=${invoice.subscription} amount_paid=${invoice.amount_paid}`);
-  const subscriptionId =
-    typeof invoice.subscription === "string"
-      ? invoice.subscription
-      : invoice.subscription?.id;
+  // Resolve subscription id from either the legacy top-level field
+  // (`invoice.subscription`) OR the new `invoice.parent.subscription_details.subscription`
+  // location introduced in API 2024-12-18.acacia. The new flow with
+  // `add_invoice_items` + `default_incomplete` populates only the latter.
+  const legacyRef = invoice.subscription;
+  // Cast through unknown — TypeScript types for older SDK builds don't
+  // know about `parent.subscription_details` yet.
+  const parent = (invoice as unknown as {
+    parent?: {
+      subscription_details?: { subscription?: string | { id: string } | null };
+    };
+  }).parent;
+  const newRef = parent?.subscription_details?.subscription ?? null;
+
+  let subscriptionId: string | undefined;
+  if (typeof legacyRef === "string") subscriptionId = legacyRef;
+  else if (legacyRef && typeof legacyRef === "object") subscriptionId = legacyRef.id;
   if (!subscriptionId) {
-    console.log(`[invoice.paid] no subscription on invoice — skipping`);
+    if (typeof newRef === "string") subscriptionId = newRef;
+    else if (newRef && typeof newRef === "object") subscriptionId = newRef.id;
+  }
+
+  console.log(
+    `[invoice.paid] invoice=${invoice.id} subscription=${subscriptionId ?? "(none)"} amount_paid=${invoice.amount_paid}`,
+  );
+
+  if (!subscriptionId) {
+    console.log(`[invoice.paid] no subscription on invoice (checked legacy + parent) — skipping`);
     return;
   }
 
@@ -199,15 +220,31 @@ async function handleInvoicePaid(
     currency: invoice.currency,
   });
 
-  // 6. Cancel the sibling (the subscription the user didn't pay). Stripe
-  // would auto-cancel after 24h anyway, but we tidy up immediately.
-  if (siblingSubId) {
-    try {
-      await stripe.subscriptions.cancel(siblingSubId);
-    } catch {
-      // Already canceled / already gone — fine.
+  // 6. Cancel the sibling subscription(s) — the customer has up to one
+  // other incomplete sub with the same analysis_id (the flow the user
+  // didn't pick). Look it up by listing the customer's subs instead of
+  // relying on cross-linked metadata (saves a round-trip at checkout time).
+  try {
+    const otherSubs = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "incomplete",
+      limit: 10,
+    });
+    for (const other of otherSubs.data) {
+      if (other.id === subscription.id) continue;
+      if (other.metadata?.analysis_id !== analysisId) continue;
+      try {
+        await stripe.subscriptions.cancel(other.id);
+      } catch {
+        // already canceled / already gone — fine
+      }
     }
+  } catch (err) {
+    console.error("Sibling-cancel lookup failed:", err);
   }
+  // siblingSubId from metadata is now unused but kept for backward
+  // compatibility if any older subs still carry it.
+  void siblingSubId;
 
   // 7. Mark analysis paid + fire the AI pipeline asynchronously.
   if (analysisId) {

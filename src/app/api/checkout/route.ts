@@ -57,16 +57,23 @@ export async function POST(req: NextRequest) {
   const recurringSku = planMeta.recurringInterval === "week" ? "recur_week" : "recur_month";
   const recurringPriceId = priceIdFor(recurringSku);
 
-  // Stripe's `add_invoice_items.price_data` needs an existing Product ID.
-  // Reuse the recurring price's product so the intro-fee line shows the
-  // same name on the invoice as the subscription itself.
-  const recurringPrice = await stripe.prices.retrieve(recurringPriceId, {
-    expand: ["product"],
-  });
-  const introProductId =
-    typeof recurringPrice.product === "string"
-      ? recurringPrice.product
-      : (recurringPrice.product as Stripe.Product).id;
+  // Resolve the product id for `add_invoice_items.price_data`. Prefer the
+  // env-cached value (one-time setup) so we save a Stripe round-trip on
+  // every checkout. Falls back to a price-retrieve if the env isn't set.
+  const cachedProductEnv =
+    planMeta.recurringInterval === "week"
+      ? process.env.STRIPE_PRODUCT_WEEKLY
+      : process.env.STRIPE_PRODUCT_MONTHLY;
+  let introProductId = cachedProductEnv ?? "";
+  if (!introProductId) {
+    const recurringPrice = await stripe.prices.retrieve(recurringPriceId, {
+      expand: ["product"],
+    });
+    introProductId =
+      typeof recurringPrice.product === "string"
+        ? recurringPrice.product
+        : (recurringPrice.product as Stripe.Product).id;
+  }
 
   const baseMetadata = {
     kind: "intro_fee" as const,
@@ -109,17 +116,9 @@ export async function POST(req: NextRequest) {
       metadata: { ...baseMetadata, flow: "card" },
     }),
   ]);
-
-  // Cross-link the two subs so the webhook can cancel the unused sibling
-  // as soon as one is paid.
-  await Promise.all([
-    stripe.subscriptions.update(subWallets.id, {
-      metadata: { ...subWallets.metadata, sibling_subscription_id: subCard.id },
-    }),
-    stripe.subscriptions.update(subCard.id, {
-      metadata: { ...subCard.metadata, sibling_subscription_id: subWallets.id },
-    }),
-  ]);
+  // The webhook finds the unused sibling by listing the customer's subs
+  // with matching analysis_id metadata — no need to pay the round-trip to
+  // cross-link them here.
 
   const walletsInvoice = subWallets.latest_invoice as Stripe.Invoice | null;
   const cardInvoice = subCard.latest_invoice as Stripe.Invoice | null;
