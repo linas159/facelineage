@@ -162,7 +162,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
       {init && (
         <Card className="mb-5 bg-[var(--color-orange-pale)]">
           <div className="flex items-baseline justify-between">
-            <span className="text-sm font-semibold text-[var(--color-ink)]">
+            <span className="text-xl font-semibold text-[var(--color-ink)]">
               Charged today
             </span>
             <span className="font-display text-3xl font-bold text-[var(--color-orange)] tabular">

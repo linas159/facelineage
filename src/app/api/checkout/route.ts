@@ -1,20 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stripe, PLANS, type PlanKey } from "@/lib/stripe";
+import type Stripe from "stripe";
+import { stripe, PLANS, priceIdFor, type PlanKey } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 
 /**
  * POST /api/checkout
- * Body: { plan, analysisId }
  *
- * Creates TWO PaymentIntents tied to the same customer:
- *   - walletsClientSecret → ExpressCheckoutElement (PayPal, Apple Pay,
- *     Google Pay, Link). Uses automatic_payment_methods so every wallet
- *     enabled on the account can render.
- *   - cardClientSecret    → PaymentElement (card form only, no tabs).
- *     Restricted via payment_method_types: ['card'].
+ * Creates TWO Stripe Subscriptions tied to the same customer:
+ *   - subWallets → ExpressCheckoutElement (card + paypal + link allowed,
+ *     so PayPal can render as a wallet *and* be saved for recurring).
+ *   - subCard    → PaymentElement (card only, no tabs).
  *
- * Whichever the user actually completes wins; the other is abandoned and
- * Stripe expires it. The webhook's intro-fee handler is identical for both.
+ * Each subscription has `trial_period_days` for the intro window and an
+ * `add_invoice_items` line for the $1.95 intro fee, with
+ * `payment_behavior: "default_incomplete"` so the first invoice's
+ * PaymentIntent must be paid to activate. After payment, Stripe auto-charges
+ * the recurring price after the trial ends (PayPal billing agreement or
+ * saved card — both work).
+ *
+ * Whichever subscription is paid wins; the webhook cancels the sibling.
  */
 export async function POST(req: NextRequest) {
   if (!stripe) {
@@ -43,8 +47,6 @@ export async function POST(req: NextRequest) {
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-  // One Stripe customer shared by both PIs — whichever PI is confirmed
-  // attaches the PaymentMethod to this customer for the recurring charge.
   const customer = await stripe.customers.create({
     metadata: {
       source: "facelineage_checkout",
@@ -52,38 +54,88 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const sharedMetadata = {
-    kind: "intro_fee",
+  const recurringSku = planMeta.recurringInterval === "week" ? "recur_week" : "recur_month";
+  const recurringPriceId = priceIdFor(recurringSku);
+
+  // Stripe's `add_invoice_items.price_data` needs an existing Product ID.
+  // Reuse the recurring price's product so the intro-fee line shows the
+  // same name on the invoice as the subscription itself.
+  const recurringPrice = await stripe.prices.retrieve(recurringPriceId, {
+    expand: ["product"],
+  });
+  const introProductId =
+    typeof recurringPrice.product === "string"
+      ? recurringPrice.product
+      : (recurringPrice.product as Stripe.Product).id;
+
+  const baseMetadata = {
+    kind: "intro_fee" as const,
     plan,
     analysis_id: analysisId,
   };
 
-  const [piWallets, piCard] = await Promise.all([
-    // Wallets PI — supports PayPal, Apple Pay, Google Pay, Link
-    stripe.paymentIntents.create({
-      amount: planMeta.introCents,
-      currency: "usd",
-      customer: customer.id,
-      setup_future_usage: "off_session",
-      automatic_payment_methods: { enabled: true },
-      description: planMeta.label,
-      metadata: { ...sharedMetadata, flow: "wallets" },
+  const baseSubParams: Omit<Stripe.SubscriptionCreateParams, "payment_settings" | "metadata"> = {
+    customer: customer.id,
+    items: [{ price: recurringPriceId, quantity: 1 }],
+    trial_period_days: planMeta.introDays,
+    add_invoice_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product: introProductId,
+          unit_amount: planMeta.introCents,
+        },
+      },
+    ],
+    payment_behavior: "default_incomplete",
+    expand: ["latest_invoice.payment_intent"],
+  };
+
+  const [subWallets, subCard] = await Promise.all([
+    stripe.subscriptions.create({
+      ...baseSubParams,
+      payment_settings: {
+        save_default_payment_method: "on_subscription",
+        payment_method_types: ["card", "paypal", "link"],
+      },
+      metadata: { ...baseMetadata, flow: "wallets" },
     }),
-    // Card PI — restricted so PaymentElement renders the card form directly
-    stripe.paymentIntents.create({
-      amount: planMeta.introCents,
-      currency: "usd",
-      customer: customer.id,
-      setup_future_usage: "off_session",
-      payment_method_types: ["card"],
-      description: planMeta.label,
-      metadata: { ...sharedMetadata, flow: "card" },
+    stripe.subscriptions.create({
+      ...baseSubParams,
+      payment_settings: {
+        save_default_payment_method: "on_subscription",
+        payment_method_types: ["card"],
+      },
+      metadata: { ...baseMetadata, flow: "card" },
     }),
   ]);
 
+  // Cross-link the two subs so the webhook can cancel the unused sibling
+  // as soon as one is paid.
+  await Promise.all([
+    stripe.subscriptions.update(subWallets.id, {
+      metadata: { ...subWallets.metadata, sibling_subscription_id: subCard.id },
+    }),
+    stripe.subscriptions.update(subCard.id, {
+      metadata: { ...subCard.metadata, sibling_subscription_id: subWallets.id },
+    }),
+  ]);
+
+  const walletsInvoice = subWallets.latest_invoice as Stripe.Invoice | null;
+  const cardInvoice = subCard.latest_invoice as Stripe.Invoice | null;
+  const walletsPI = walletsInvoice?.payment_intent as Stripe.PaymentIntent | null;
+  const cardPI = cardInvoice?.payment_intent as Stripe.PaymentIntent | null;
+
+  if (!walletsPI?.client_secret || !cardPI?.client_secret) {
+    return NextResponse.json(
+      { error: "Could not initialize checkout" },
+      { status: 500 },
+    );
+  }
+
   return NextResponse.json({
-    walletsClientSecret: piWallets.client_secret,
-    cardClientSecret: piCard.client_secret,
+    walletsClientSecret: walletsPI.client_secret,
+    cardClientSecret: cardPI.client_secret,
     publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
     amount: planMeta.introCents,
     currency: "usd",

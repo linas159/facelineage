@@ -63,14 +63,23 @@ const ICON = {
   privacyBig: "/paywall/privacy.png",
 };
 
+export type SavedPaymentMethod = {
+  kind: "card" | "paypal" | "link";
+  label: string; // e.g. "VISA ●●●● 4242" or "PayPal"
+};
+
 interface PaywallClientProps {
   analysisId: string;
+  /** When provided, the paywall offers one-tap charge on this saved
+   *  payment method instead of routing through /checkout. */
+  savedPm?: SavedPaymentMethod | null;
 }
 
-export function PaywallClient({ analysisId }: PaywallClientProps) {
+export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
   const router = useRouter();
   const [selected, setSelected] = useState<PlanKey>("sub_intro_3d");
   const [busy, setBusy] = useState(false);
+  const [chargeError, setChargeError] = useState<string | null>(null);
   const [selfieSrc, setSelfieSrc] = useState<string | null>(null);
   const [remainingMs, setRemainingMs] = useState(OFFER_WINDOW_MS);
 
@@ -109,6 +118,49 @@ export function PaywallClient({ analysisId }: PaywallClientProps) {
     document
       .getElementById("paywall-pricing")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function chargeSavedPm() {
+    setBusy(true);
+    setChargeError(null);
+    try {
+      const res = await fetch("/api/intro-charge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ plan: selected, analysisId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        requiresCheckout?: boolean;
+        requiresAction?: boolean;
+        clientSecret?: string;
+        publishableKey?: string;
+        error?: string;
+      };
+      if (data.success) {
+        router.push(`/report/${analysisId}`);
+        return;
+      }
+      if (data.requiresAction && data.clientSecret && data.publishableKey) {
+        // 3DS challenge — Stripe.js handles the popup.
+        const { loadStripe } = await import("@stripe/stripe-js");
+        const stripe = await loadStripe(data.publishableKey);
+        if (!stripe) throw new Error("Could not load Stripe.js");
+        const result = await stripe.handleNextAction({ clientSecret: data.clientSecret });
+        if (result.error) throw new Error(result.error.message ?? "Authentication failed");
+        router.push(`/report/${analysisId}`);
+        return;
+      }
+      if (data.requiresCheckout) {
+        // Fallback — saved PM not usable, go to full checkout.
+        router.push(`/checkout?plan=${selected}&analysis=${analysisId}`);
+        return;
+      }
+      throw new Error(data.error ?? "Charge failed");
+    } catch (err) {
+      setChargeError(err instanceof Error ? err.message : "Charge failed");
+      setBusy(false);
+    }
   }
 
   function startCheckout() {
@@ -406,10 +458,35 @@ export function PaywallClient({ analysisId }: PaywallClientProps) {
         })}
       </div>
 
-      {/* CTA */}
-      <Button size="block" onClick={startCheckout} disabled={busy} className="mb-3">
-        {busy ? "Loading…" : `Unlock my report — ${plan.intro}`}
-      </Button>
+      {/* CTA — one-tap charge for returning users with a saved card */}
+      {savedPm ? (
+        <>
+          <Button
+            size="block"
+            onClick={chargeSavedPm}
+            disabled={busy}
+            className="mb-2"
+          >
+            {busy ? "Charging…" : `Charge ${savedPm.label} for ${plan.intro}`}
+          </Button>
+          <button
+            type="button"
+            onClick={() => router.push(`/checkout?plan=${selected}&analysis=${analysisId}`)}
+            className="mb-3 w-full text-center text-xs text-[var(--color-ink-muted)] hover:text-[var(--color-ink-soft)]"
+          >
+            Use a different payment method
+          </button>
+          {chargeError && (
+            <p className="mb-3 rounded-[var(--radius-input)] bg-[var(--color-coral)]/10 p-3 text-center text-sm text-[var(--color-coral)]">
+              {chargeError}
+            </p>
+          )}
+        </>
+      ) : (
+        <Button size="block" onClick={startCheckout} disabled={busy} className="mb-3">
+          {busy ? "Loading…" : `Unlock my report — ${plan.intro}`}
+        </Button>
+      )}
 
       <p className="mb-6 text-center text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
         Your {introPeriod} trial will cost only {plan.introCents}.

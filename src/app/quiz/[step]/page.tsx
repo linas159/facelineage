@@ -79,7 +79,7 @@ const QUIZ_STEPS: Step[] = [
   {
     id: 5,
     key: "age",
-    q: "What age range applies to you?",
+    q: "What is your age?",
     options: [
       { label: "<18", emoji: "seed", iconSrc: "/quiz/q5-seed.png" },
       { label: "18–24", emoji: "🌱", iconSrc: "/quiz/q5-sprout.png" },

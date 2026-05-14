@@ -44,11 +44,17 @@ export async function POST(req: NextRequest) {
       case "payment_intent.succeeded": {
         const pi = event.data.object as Stripe.PaymentIntent;
         const kind = pi.metadata?.kind;
-        if (kind === "intro_fee") {
-          await handleIntroFeePaid(pi, db);
-        } else if (kind === "upsell") {
+        // Intro-fee PIs now belong to subscription invoices (see
+        // /api/checkout). Skip them here — invoice.paid handles that flow.
+        // Upsell PIs are still standalone and processed here.
+        if (kind === "upsell" && !pi.invoice) {
           await handleUpsellPaid(pi, db);
         }
+        break;
+      }
+      case "invoice.paid": {
+        const invoice = event.data.object as Stripe.Invoice;
+        await handleInvoicePaid(invoice, db);
         break;
       }
       case "customer.subscription.updated":
@@ -85,38 +91,55 @@ export async function POST(req: NextRequest) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Intro fee paid → create subscription on the recurring price with a trial
-// that lasts the intro period, then fire the main AI pipeline.
+// Intro fee paid → the subscription is already created by /api/checkout.
+// This handler just provisions the user, persists the subscription row,
+// cancels the sibling subscription (the other flow the user didn't pick),
+// and fires the AI pipeline.
 // ────────────────────────────────────────────────────────────────────────────
 
-async function handleIntroFeePaid(
-  pi: Stripe.PaymentIntent,
+async function handleInvoicePaid(
+  invoice: Stripe.Invoice,
   db: ReturnType<typeof createServiceClient>,
 ) {
-  const md = pi.metadata ?? {};
+  const subscriptionId =
+    typeof invoice.subscription === "string"
+      ? invoice.subscription
+      : invoice.subscription?.id;
+  if (!subscriptionId) return;
+
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  const md = subscription.metadata ?? {};
+  if (md.kind !== "intro_fee") return;
+
   const plan = md.plan as PlanKey | undefined;
   const analysisId = md.analysis_id;
+  const siblingSubId = md.sibling_subscription_id;
   if (!plan || !PLANS[plan]) return;
 
-  // 1. Get the email from the PaymentMethod's billing_details. The PI was
-  // created with an empty-email customer; the PM was attached to that
-  // customer via setup_future_usage during confirmation (so no manual
-  // attach is needed — and would actually fail with "PM was previously
-  // used without being attached").
-  const paymentMethodId =
+  // 1. Get the PaymentMethod + email from the invoice's PaymentIntent.
+  const piId =
+    typeof invoice.payment_intent === "string"
+      ? invoice.payment_intent
+      : invoice.payment_intent?.id;
+  if (!piId) return;
+  const pi = await stripe.paymentIntents.retrieve(piId);
+  const pmId =
     typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
-  const customerId = typeof pi.customer === "string" ? pi.customer : pi.customer?.id;
-  if (!paymentMethodId || !customerId) {
-    console.error(`Intro fee PI ${pi.id}: missing payment_method or customer`);
+  if (!pmId) {
+    console.error(`invoice.paid ${invoice.id}: no payment_method on PI`);
+    return;
+  }
+  const pm = await stripe.paymentMethods.retrieve(pmId);
+  const email = pm.billing_details?.email ?? pi.receipt_email ?? undefined;
+  if (!email) {
+    console.error(`invoice.paid ${invoice.id}: no email in billing_details`);
     return;
   }
 
-  const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
-  const email = pm.billing_details?.email ?? pi.receipt_email ?? undefined;
-  if (!email) {
-    console.error(`Intro fee PI ${pi.id}: no email in payment_method billing_details`);
-    return;
-  }
+  const customerId =
+    typeof subscription.customer === "string"
+      ? subscription.customer
+      : subscription.customer.id;
 
   // 2. Find or create the Supabase user.
   let userId: string | undefined;
@@ -135,74 +158,55 @@ async function handleIntroFeePaid(
   }
   if (!userId) return;
 
-  // 3. Fill in the email + supabase id on the customer, and make this PM
-  // the default for invoices (so the trial-end invoice charges it).
+  // 3. Backfill email + supabase id on the customer.
   await stripe.customers.update(customerId, {
     email,
     metadata: { source: "facelineage_checkout", supabase_user_id: userId },
-    invoice_settings: { default_payment_method: paymentMethodId },
   });
 
-  // 5. Plan-specific setup follows.
-  const planMeta = PLANS[plan];
-  const recurringSku = planMeta.recurringInterval === "week" ? "recur_week" : "recur_month";
-  const recurringPriceId = priceIdFor(recurringSku);
+  // 4. Persist the live subscription row.
+  await db.from("subscriptions").upsert({
+    user_id: userId,
+    stripe_customer_id: customerId,
+    stripe_subscription_id: subscription.id,
+    product_sku: plan,
+    status: subscription.status as
+      | "trialing"
+      | "active"
+      | "past_due"
+      | "canceled"
+      | "incomplete",
+    current_period_start: epochToIso(subscription.current_period_start),
+    current_period_end: epochToIso(subscription.current_period_end),
+  });
 
-  // Idempotency: if we already created a sub for this user, do nothing.
-  const { data: existingSub } = await db
-    .from("subscriptions")
-    .select("stripe_subscription_id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (existingSub?.stripe_subscription_id) {
-    // Already provisioned by an earlier delivery of this event.
-  } else {
-    const newSub = await stripe.subscriptions.create({
-      customer: customerId,
-      items: [{ price: recurringPriceId, quantity: 1 }],
-      default_payment_method: paymentMethodId ?? undefined,
-      trial_period_days: planMeta.introDays,
-      // After trial, normal billing kicks in.
-      proration_behavior: "none",
-      metadata: {
-        plan,
-        analysis_id: analysisId ?? "",
-        supabase_user_id: userId,
-        intro_payment_intent: pi.id,
-      },
-    });
-
-    await db.from("subscriptions").upsert({
-      user_id: userId,
-      stripe_customer_id: customerId,
-      stripe_subscription_id: newSub.id,
-      product_sku: plan,
-      status: newSub.status as "trialing" | "active" | "past_due" | "canceled" | "incomplete",
-      current_period_start: epochToIso(newSub.current_period_start),
-      current_period_end: epochToIso(newSub.current_period_end),
-    });
-  }
-
-  // Record the intro purchase + fire AI pipeline (manual idempotency —
-  // doesn't depend on a unique index existing).
+  // 5. Record the intro purchase.
   await recordPurchase(db, {
     user_id: userId,
     analysis_id: analysisId ?? null,
     product_sku: plan,
     stripe_payment_intent: pi.id,
-    amount_cents: pi.amount,
-    currency: pi.currency,
+    amount_cents: invoice.amount_paid,
+    currency: invoice.currency,
   });
 
+  // 6. Cancel the sibling (the subscription the user didn't pay). Stripe
+  // would auto-cancel after 24h anyway, but we tidy up immediately.
+  if (siblingSubId) {
+    try {
+      await stripe.subscriptions.cancel(siblingSubId);
+    } catch {
+      // Already canceled / already gone — fine.
+    }
+  }
+
+  // 7. Mark analysis paid + fire the AI pipeline asynchronously.
   if (analysisId) {
     await db
       .from("analyses")
       .update({ is_paid: true, generation_status: "queued" })
       .eq("id", analysisId);
 
-    // Run after the response is sent so Stripe doesn't time out on us,
-    // but inside the same function invocation so Vercel doesn't kill us.
     after(async () => {
       console.log(`[after] Starting main pipeline for analysis=${analysisId}`);
       try {
