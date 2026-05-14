@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
   }
 
   const db = createServiceClient();
+  console.log(`[webhook] received event: type=${event.type} id=${event.id}`);
 
   try {
     switch (event.type) {
@@ -101,15 +102,23 @@ async function handleInvoicePaid(
   invoice: Stripe.Invoice,
   db: ReturnType<typeof createServiceClient>,
 ) {
+  console.log(`[invoice.paid] invoice=${invoice.id} subscription=${invoice.subscription} amount_paid=${invoice.amount_paid}`);
   const subscriptionId =
     typeof invoice.subscription === "string"
       ? invoice.subscription
       : invoice.subscription?.id;
-  if (!subscriptionId) return;
+  if (!subscriptionId) {
+    console.log(`[invoice.paid] no subscription on invoice — skipping`);
+    return;
+  }
 
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
   const md = subscription.metadata ?? {};
-  if (md.kind !== "intro_fee") return;
+  console.log(`[invoice.paid] sub=${subscription.id} metadata.kind=${md.kind} metadata.flow=${md.flow}`);
+  if (md.kind !== "intro_fee") {
+    console.log(`[invoice.paid] not intro_fee — skipping`);
+    return;
+  }
 
   const plan = md.plan as PlanKey | undefined;
   const analysisId = md.analysis_id;

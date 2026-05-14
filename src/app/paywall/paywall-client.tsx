@@ -526,7 +526,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
             <img src={ICON.guaranteeBig} alt="" aria-hidden className="h-full w-full object-contain" />
           </div>
           <h3 className="mb-3 font-display text-xl font-bold text-[var(--color-ink)]">
-            Loved it, or your money back
+            Loved it, or get your money back
           </h3>
           <p className="text-sm leading-relaxed text-[var(--color-ink-soft)]">
             Reading the story written into your face is something we take seriously. Every
