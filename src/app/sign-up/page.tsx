@@ -63,9 +63,9 @@ export default async function SignInPage({
         </p>
       )}
 
-      <p className="mt-6 text-center text-xs leading-relaxed text-[var(--color-ink-muted)]">
+      <p className="mt-6 text-center text-base leading-relaxed text-[var(--color-ink-soft)]">
         New here?{" "}
-        <Link href="/" className="underline hover:text-[var(--color-orange)]">
+        <Link href="/" className="font-semibold underline hover:text-[var(--color-orange)]">
           Take the quiz to start a report
         </Link>
         .

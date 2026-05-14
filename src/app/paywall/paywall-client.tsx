@@ -7,6 +7,7 @@ import { Card, Chip } from "@/components/ui/card";
 import { TestimonialsSection } from "@/components/testimonials";
 import { Illustration } from "@/components/illustration";
 import { cn } from "@/lib/utils";
+import { preloadCheckoutInit } from "@/lib/preload-checkout";
 
 type PlanKey = "sub_intro_3d" | "sub_intro_7d" | "sub_intro_1m";
 
@@ -91,7 +92,10 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
       const stored = sessionStorage.getItem("fl_selfie_preview");
       if (stored) setSelfieSrc(stored);
     } catch {}
-  }, []);
+    // Warm the /checkout route JS bundle so the click-to-render gap is
+    // dominated by Stripe (which we preload in parallel), not by code.
+    router.prefetch("/checkout");
+  }, [router]);
 
   useEffect(() => {
     let deadline: number;
@@ -165,6 +169,11 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
 
   function startCheckout() {
     setBusy(true);
+    // Fire the checkout-init request *before* navigating. The /checkout
+    // page reads the result from sessionStorage on mount, skipping the
+    // ~5–10s Stripe round-trip. Stash by plan+analysis so a plan switch
+    // mid-flight doesn't crosswire.
+    void preloadCheckoutInit(selected, analysisId);
     router.push(`/checkout?plan=${selected}&analysis=${analysisId}`);
   }
 

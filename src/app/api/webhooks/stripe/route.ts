@@ -4,6 +4,7 @@ import type Stripe from "stripe";
 import { stripe, priceIdFor, PLANS, type PlanKey } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { runMainPipeline, runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
+import { sendReportReadyEmail } from "@/lib/email/send";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -312,6 +313,13 @@ async function handleInvoicePaid(
       console.log(`[invoice.paid] analysis ${analysisId} marked paid + queued`);
     }
 
+    // Snapshot the values the email needs — `after()` runs on a different
+    // tick, after we've already returned to Stripe.
+    const planMeta = PLANS[plan];
+    const cardLast4 = pm.type === "card" ? pm.card?.last4 ?? undefined : undefined;
+    const trialEndsEpoch = subscription.trial_end ?? null;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://facelineage.com";
+
     after(async () => {
       console.log(`[after] Starting main pipeline for analysis=${analysisId}`);
       try {
@@ -319,6 +327,30 @@ async function handleInvoicePaid(
         console.log(`[after] Main pipeline complete for analysis=${analysisId}`);
       } catch (err) {
         console.error(`[after] Main pipeline failed for analysis=${analysisId}:`, err);
+        return; // Don't email a broken report
+      }
+
+      try {
+        await sendReportReadyEmail(email, {
+          reportUrl: `${baseUrl}/report/${analysisId}`,
+          amountPaid: planMeta.introPrice,
+          paymentDate: new Date().toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          }),
+          cardLast4,
+          trialEnds: trialEndsEpoch
+            ? new Date(trialEndsEpoch * 1000).toLocaleDateString("en-US", {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })
+            : "the end of your trial",
+          recurringAmount: `${planMeta.recurringPrice}/${planMeta.recurringPeriod}`,
+        });
+      } catch (err) {
+        console.error(`[after] email send failed for ${email}:`, err);
       }
     });
   } else {

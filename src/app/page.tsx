@@ -24,9 +24,14 @@ export default function LandingPage() {
         {/* Nav */}
         <header className="relative z-10 mx-auto flex w-full max-w-md items-center justify-between px-5 pt-3 pb-1">
           <Logo className="h-10" />
-          <Link href="/sign-up">
-            <Button variant="ghost" size="sm">Sign in</Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/refunds">
+              <Button variant="ghost" size="sm">Ask for refund</Button>
+            </Link>
+            <Link href="/sign-up">
+              <Button variant="ghost" size="sm">Sign in</Button>
+            </Link>
+          </div>
         </header>
 
         <div className="relative z-10 mx-auto w-full max-w-md px-5 pb-5">
@@ -173,14 +178,15 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="mx-auto max-w-md px-5 py-8 text-center text-xs text-[var(--color-ink-muted)]">
+      <footer className="mx-auto max-w-md px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
         <p>© {new Date().getFullYear()} Facelineage</p>
         <hr className="mt-3" />
-        <div className="mt-3 flex justify-center gap-4">
+        <div className="mt-4 flex flex-wrap justify-center gap-x-5 gap-y-2 text-base font-medium">
           <Link href="/privacy" className="hover:text-[var(--color-orange)]">Privacy</Link>
           <Link href="/terms" className="hover:text-[var(--color-orange)]">Terms</Link>
           <Link href="/cookies" className="hover:text-[var(--color-orange)]">Cookies</Link>
           <Link href="/refunds" className="hover:text-[var(--color-orange)]">Refunds</Link>
+          <Link href="/contact" className="hover:text-[var(--color-orange)]">Contact</Link>
         </div>
       </footer>
     </main>

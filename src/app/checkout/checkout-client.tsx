@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PLANS, type PlanKey } from "@/lib/stripe";
+import { preloadCheckoutInit } from "@/lib/preload-checkout";
 
 type Mode = "intro" | "upsell";
 type UpsellId = "parents" | "ethnicity" | "ages" | "partner" | "book";
@@ -96,16 +97,25 @@ export function CheckoutClient(props: CheckoutClientProps) {
 
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
-      const url = props.mode === "intro" ? "/api/checkout" : "/api/upsell-checkout";
-      const body =
-        props.mode === "intro"
-          ? { plan: props.plan, analysisId: props.analysisId }
-          : { upsell: props.upsellId, analysisId: props.analysisId };
-      const res = await fetch(url, {
+      // Intro mode: dedupe with the paywall preload. preloadCheckoutInit()
+      // returns the cached/in-flight response if it exists, otherwise it
+      // fires the fetch. This keeps a hard refresh on /checkout working
+      // while making the paywall→checkout transition feel instant.
+      if (props.mode === "intro" && props.plan) {
+        const data = await preloadCheckoutInit(props.plan, props.analysisId);
+        if (cancelled) return;
+        if (data) setInit(data);
+        else setError("Could not start checkout");
+        return;
+      }
+
+      // Upsell mode — one-time PI, no preload path.
+      const res = await fetch("/api/upsell-checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ upsell: props.upsellId, analysisId: props.analysisId }),
       });
       if (!res.ok) {
         const t = await res.text();
@@ -219,14 +229,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
         </Elements>
       )}
 
-      {!init && !error && (
-        <Card className="text-center">
-          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-[var(--color-orange-pale)] border-t-[var(--color-orange)]" />
-          <p className="mt-3 text-xs text-[var(--color-ink-muted)]">
-            Preparing secure checkout…
-          </p>
-        </Card>
-      )}
+      {!init && !error && <CheckoutLoader />}
 
       <p className="mt-6 text-center text-[10px] leading-relaxed text-[var(--color-ink-muted)]">
         Payments are processed by Stripe. Your card details never touch our servers.
@@ -421,4 +424,39 @@ function formatMoney(cents: number, currency: string): string {
     style: "currency",
     currency: currency.toUpperCase(),
   }).format(cents / 100);
+}
+
+const LOADER_PHASES = [
+  "Preparing secure checkout…",
+  "Talking to Stripe…",
+  "Setting up payment options…",
+  "Almost there…",
+];
+
+function CheckoutLoader() {
+  const [phaseIdx, setPhaseIdx] = useState(0);
+  useEffect(() => {
+    const id = setInterval(
+      () => setPhaseIdx((i) => (i + 1) % LOADER_PHASES.length),
+      1800,
+    );
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <Card className="text-center">
+      <div className="relative mx-auto h-16 w-16">
+        <span className="absolute inset-0 animate-ping rounded-full bg-[var(--color-orange)]/20" />
+        <span className="absolute inset-2 animate-pulse rounded-full bg-[var(--color-orange)]/15" />
+        <span className="absolute inset-3 flex items-center justify-center rounded-full bg-[var(--color-orange-pale)]">
+          <span className="block h-7 w-7 animate-spin rounded-full border-[3px] border-[var(--color-orange)]/30 border-t-[var(--color-orange)]" />
+        </span>
+      </div>
+      <p className="mt-4 text-sm font-semibold text-[var(--color-ink)]">
+        {LOADER_PHASES[phaseIdx]}
+      </p>
+      <p className="mt-1 text-[11px] text-[var(--color-ink-muted)]">
+        This usually takes a few seconds.
+      </p>
+    </Card>
+  );
 }

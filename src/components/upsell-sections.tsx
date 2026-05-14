@@ -20,6 +20,7 @@ export type Upsell = {
   subtitle: string;
   body: string;
   price: string;
+  originalPrice: string;
   imageSrc: string;
   cta: string;
   accent: string;
@@ -33,6 +34,7 @@ export const UPSELLS: Upsell[] = [
     body:
       "Upload a photo of each parent. We'll trace which features and which slices of heritage you inherited from each side, with a side-by-side comparison.",
     price: "$4.99",
+    originalPrice: "$8.99",
     imageSrc: "/upsell/parents.png",
     cta: "Add my parents",
     accent: "var(--color-orange)",
@@ -44,6 +46,7 @@ export const UPSELLS: Upsell[] = [
     body:
       "Watch your face reborn as a Han poet, a Yoruba weaver, a Sami reindeer herder — and a dozen more reflections from across the world.",
     price: "$6.99",
+    originalPrice: "$12.99",
     imageSrc: "/upsell/ethnicity.png",
     cta: "Show my reflections",
     accent: "var(--color-violet)",
@@ -55,6 +58,7 @@ export const UPSELLS: Upsell[] = [
     body:
       "What if you'd lived in Tang-dynasty China, ancient Rome, or the Viking age? We generate eight portraits of you across history.",
     price: "$6.99",
+    originalPrice: "$12.99",
     imageSrc: "/upsell/ages.png",
     cta: "Generate my portraits",
     accent: "var(--color-yellow)",
@@ -66,6 +70,7 @@ export const UPSELLS: Upsell[] = [
     body:
       "Based on the proportions, palette, and heritage of your face, we render a portrait of the kind of person who would balance you most.",
     price: "$6.99",
+    originalPrice: "$12.99",
     imageSrc: "/upsell/partner.png",
     cta: "Reveal my match",
     accent: "var(--color-coral)",
@@ -77,6 +82,7 @@ export const UPSELLS: Upsell[] = [
     body:
       "Methods, tools, and frameworks for taking your heritage discovery further: how to trace ancestors, decode DNA results, conduct oral histories, and read old records. A printable PDF you keep forever.",
     price: "$9.99",
+    originalPrice: "$17.99",
     imageSrc: "/upsell/book.png",
     cta: "Get the guidebook",
     accent: "var(--color-green)",
@@ -114,14 +120,24 @@ function UpsellCard({ upsell, busy, purchased, error, onAccept }: UpsellCardProp
         <CardDescription className="mb-4">{upsell.body}</CardDescription>
 
         <div className="mb-3 flex items-baseline justify-between rounded-[var(--radius-input)] bg-[var(--color-bg-warm)] px-4 py-3">
-          <span className="text-sm font-semibold text-[var(--color-ink)]">
-            One-time
+          <span className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-[var(--color-ink)]">
+              One-time
+            </span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-coral)]">
+              -45% off today
+            </span>
           </span>
-          <span
-            className="font-display text-2xl font-bold tabular"
-            style={{ color: upsell.accent }}
-          >
-            {upsell.price}
+          <span className="flex items-baseline gap-2">
+            <span className="font-display text-base font-bold tabular text-[var(--color-ink-muted)] line-through decoration-[var(--color-coral)] decoration-2">
+              {upsell.originalPrice}
+            </span>
+            <span
+              className="font-display text-3xl font-extrabold tabular"
+              style={{ color: upsell.accent }}
+            >
+              {upsell.price}
+            </span>
           </span>
         </div>
 
@@ -137,7 +153,14 @@ function UpsellCard({ upsell, busy, purchased, error, onAccept }: UpsellCardProp
             disabled={busy}
             onClick={() => onAccept(upsell.id)}
           >
-            {busy ? "Processing…" : upsell.cta}
+            {busy ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                Processing payment…
+              </span>
+            ) : (
+              upsell.cta
+            )}
           </Button>
         )}
 
@@ -274,24 +297,42 @@ function UpsellModal({ upsell, busy, onAccept, onDecline }: UpsellModalProps) {
           </p>
 
           <div className="mb-4 flex items-baseline justify-between rounded-[var(--radius-input)] bg-[var(--color-bg-warm)] px-4 py-3">
-            <span className="text-sm font-semibold text-[var(--color-ink)]">
-              One-time
+            <span className="flex flex-col gap-0.5">
+              <span className="text-sm font-semibold text-[var(--color-ink)]">
+                One-time
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-coral)]">
+                -45% off today
+              </span>
             </span>
-            <span
-              className="font-display text-2xl font-bold tabular"
-              style={{ color: upsell.accent }}
-            >
-              {upsell.price}
+            <span className="flex items-baseline gap-2">
+              <span className="font-display text-3xl font-bold tabular text-[var(--color-ink-muted)] line-through decoration-[var(--color-coral)] decoration-2">
+                {upsell.originalPrice}
+              </span>
+              <span
+                className="font-display text-xl font-bold tabular"
+                style={{ color: upsell.accent }}
+              >
+                {upsell.price}
+              </span>
             </span>
           </div>
 
           <Button size="block" disabled={busy} onClick={() => onAccept(upsell.id)}>
-            {upsell.cta}
+            {busy ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                Processing payment…
+              </span>
+            ) : (
+              upsell.cta
+            )}
           </Button>
           <button
             type="button"
             onClick={onDecline}
-            className="mt-3 w-full text-center text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink-soft)]"
+            disabled={busy}
+            className="mt-3 w-full text-center text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink-soft)] disabled:opacity-40"
           >
             No thanks, maybe later
           </button>

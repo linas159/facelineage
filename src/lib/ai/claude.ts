@@ -209,7 +209,7 @@ export async function analyzeFace(opts: {
   const contextBlock = formatContext(opts.context);
 
   const resp = await c.messages.create({
-    model: "claude-sonnet-4-6",
+    model: "claude-haiku-4-5",
     max_tokens: 4096,
     // Cache the static system prompt + tool schema so re-runs are cheap.
     system: [
@@ -302,7 +302,7 @@ export async function compareParents(opts: {
 }): Promise<ParentsComparison> {
   const c = client();
   const resp = await c.messages.create({
-    model: "claude-sonnet-4-6",
+    model: "claude-haiku-4-5",
     max_tokens: 1024,
     system: [{ type: "text", text: PARENTS_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     tools: [{ ...PARENTS_TOOL, cache_control: { type: "ephemeral" } }] as never,
