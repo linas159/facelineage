@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { createServiceClient } from "@/lib/supabase/server";
-import { analyzeFace, type AnalysisResult } from "./claude";
+import { analyzeFace } from "./claude";
 import { generateImage } from "./image-gen";
 import { compareParents } from "./claude";
 
@@ -66,27 +66,6 @@ export async function runMainPipeline(analysisId: string): Promise<void> {
     });
     console.log(`[pipeline] Claude done in ${Date.now() - claudeStart}ms, regions=${result.regions.length}`);
 
-    const userId = row.user_id ?? "shared";
-
-    console.log(`[pipeline] generating ancestor portrait…`);
-    const imgStart = Date.now();
-    const ancestorBytes = await generateImage({
-      prompt: result.ancestor.image_prompt,
-      referenceImageBase64: selfieBase64,
-      referenceMediaType: selfie.mediaType,
-      aspect: "4:5",
-    });
-    console.log(`[pipeline] portrait done in ${Date.now() - imgStart}ms, ${ancestorBytes.length} bytes`);
-
-    // 4. Upload generated images
-    console.log(`[pipeline] uploading portrait…`);
-    const ancestorPath = await uploadGenerated(
-      db,
-      `${userId}/${analysisId}/ancestor-${randomUUID()}.png`,
-      ancestorBytes,
-    );
-    console.log(`[pipeline] portrait uploaded → ${ancestorPath}`);
-
     const insightsWithPaths = result.cultural_insights.map((ci) => ({
       ...ci,
       image_path: null,
@@ -94,7 +73,7 @@ export async function runMainPipeline(analysisId: string): Promise<void> {
 
     const persistAncestor = {
       ...result.ancestor,
-      image_path: ancestorPath,
+      image_path: null,
     };
 
     console.log(`[pipeline] persisting analysis row…`);
