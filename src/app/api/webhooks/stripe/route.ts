@@ -158,20 +158,34 @@ async function handleInvoicePaid(
   else if (legacyPi && typeof legacyPi === "object") piId = legacyPi.id;
 
   if (!piId) {
-    // Re-fetch the invoice with payments expanded; some webhook payloads
-    // omit the payments array even on the new schema.
-    const full = (await stripe.invoices.retrieve(invoice.id!, {
-      expand: ["payments"],
+    // Re-fetch the subscription with latest_invoice.payment_intent expanded —
+    // the most reliable place to get the PI id under API 2024-12-18.acacia.
+    const subExpanded = (await stripe.subscriptions.retrieve(subscriptionId, {
+      expand: ["latest_invoice.payment_intent"],
     })) as unknown as {
-      payments?: Array<{
-        payment?: { payment_intent?: string | { id: string } | null };
-      }>;
+      latest_invoice?: {
+        payment_intent?: string | { id: string } | null;
+      };
     };
-    for (const p of full.payments ?? []) {
-      const ref = p.payment?.payment_intent;
-      if (!ref) continue;
-      piId = typeof ref === "string" ? ref : ref.id;
-      if (piId) break;
+    const expandedPi = subExpanded.latest_invoice?.payment_intent;
+    if (typeof expandedPi === "string") piId = expandedPi;
+    else if (expandedPi && typeof expandedPi === "object") piId = expandedPi.id;
+  }
+
+  if (!piId) {
+    // Last-resort fallback — list PaymentIntents for this customer and find
+    // the most recent one tied to this invoice.
+    const piList = await stripe.paymentIntents.list({
+      customer: customerIdFromSubscription(subscription),
+      limit: 5,
+    });
+    for (const candidate of piList.data) {
+      if (candidate.invoice && (typeof candidate.invoice === "string"
+        ? candidate.invoice
+        : candidate.invoice.id) === invoice.id) {
+        piId = candidate.id;
+        break;
+      }
     }
   }
 
@@ -382,6 +396,10 @@ async function recordPurchase(
     return null;
   }
   return inserted.id;
+}
+
+function customerIdFromSubscription(sub: Stripe.Subscription): string {
+  return typeof sub.customer === "string" ? sub.customer : sub.customer.id;
 }
 
 function epochToIso(secs: number | null | undefined): string | null {
