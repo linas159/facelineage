@@ -49,7 +49,20 @@ export default async function PaymentCompletePage({
     return failed(`Payment is ${pi.status}. Please try again or contact support.`);
   }
 
-  const email = pi.metadata?.email ?? pi.receipt_email ?? undefined;
+  // Email lives on the PaymentMethod's billing_details (wallet auto-fills it;
+  // card form collects it inline). Fall back to receipt_email just in case.
+  let email: string | undefined;
+  const pmId = typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
+  if (pmId) {
+    try {
+      const pm = await stripe.paymentMethods.retrieve(pmId);
+      email = pm.billing_details?.email ?? undefined;
+    } catch {
+      // ignore — fall through to receipt_email
+    }
+  }
+  if (!email) email = pi.receipt_email ?? undefined;
+
   const analysisId = pi.metadata?.analysis_id ?? params.analysis;
   if (!email || !analysisId) {
     return failed("Payment confirmed but we couldn't link it to your account. Please contact support.");

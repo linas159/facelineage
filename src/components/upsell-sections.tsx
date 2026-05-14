@@ -305,15 +305,32 @@ interface UpsellPopupSequenceProps {
   ids?: UpsellId[];
   /** Required for the buttons to actually start checkout. Demo report has no analysisId. */
   analysisId?: string;
+  /** When true, fire the first modal immediately on mount instead of
+   *  waiting for the bottom-of-page sentinel to scroll into view. Used on
+   *  the "report generating" screen — the user is already engaged. */
+  triggerOnMount?: boolean;
 }
 
 /**
- * Drop this at the very bottom of a page. It renders a 1px sentinel that —
- * when it intersects the viewport — triggers a sequence of upsell modals.
+ * Sequenced upsell modals. Two trigger modes:
+ *   1. Default: renders a 1px sentinel; when scrolled into view, the first
+ *      modal opens. Used at the bottom of long pages.
+ *   2. triggerOnMount: opens the first modal immediately on mount. Used on
+ *      the "your report is generating" screen.
+ *
  * Each modal advances on accept or decline; once all are seen, nothing
  * shows again for the rest of the page life.
  */
-export function UpsellPopupSequence({ ids, analysisId }: UpsellPopupSequenceProps) {
+// Delay before the first upsell modal pops up on the "report generating"
+// screen — gives the user a few seconds to read "Your report is being
+// composed" before we throw the first upsell at them.
+const TRIGGER_ON_MOUNT_DELAY_MS = 5000;
+
+export function UpsellPopupSequence({
+  ids,
+  analysisId,
+  triggerOnMount = false,
+}: UpsellPopupSequenceProps) {
   const list = ids ? UPSELLS.filter((u) => ids.includes(u.id)) : UPSELLS;
   const [step, setStep] = useState<number>(-1);
   const [busy, setBusy] = useState<UpsellId | null>(null);
@@ -321,6 +338,16 @@ export function UpsellPopupSequence({ ids, analysisId }: UpsellPopupSequenceProp
   const triggered = useRef(false);
 
   useEffect(() => {
+    if (triggerOnMount) {
+      // Fire the first modal after a short delay so the user can read the
+      // "report is being composed" message first. Generation runs in
+      // parallel in the webhook; the upsell modals are purely UI.
+      const t = setTimeout(() => {
+        triggered.current = true;
+        setStep(0);
+      }, TRIGGER_ON_MOUNT_DELAY_MS);
+      return () => clearTimeout(t);
+    }
     const node = sentinelRef.current;
     if (!node) return;
     const obs = new IntersectionObserver(
@@ -338,7 +365,12 @@ export function UpsellPopupSequence({ ids, analysisId }: UpsellPopupSequenceProp
     );
     obs.observe(node);
     return () => obs.disconnect();
-  }, []);
+  }, [triggerOnMount]);
+
+  // When a charge succeeds we show a quick "added!" confirmation modal
+  // before advancing to the next upsell. Stays on screen ~1.8s, or until
+  // the user taps Continue.
+  const [confirmedUpsell, setConfirmedUpsell] = useState<Upsell | null>(null);
 
   async function handleAccept(id: UpsellId) {
     if (!analysisId) {
@@ -346,16 +378,25 @@ export function UpsellPopupSequence({ ids, analysisId }: UpsellPopupSequenceProp
       setStep((s) => s + 1);
       return;
     }
+    const upsellRef = list.find((u) => u.id === id) ?? null;
     setBusy(id);
     const result = await chargeUpsell(id, analysisId);
     setBusy(null);
-    if (result === "checkout") {
-      window.location.href = `/checkout?upsell=${id}&analysis=${analysisId}`;
+
+    if (result === "success") {
+      setConfirmedUpsell(upsellRef);
+      // Auto-advance after a short pause; user can also tap Continue
+      // (handled inside ConfirmationModal below).
+      setTimeout(() => {
+        setConfirmedUpsell((c) => (c?.id === id ? null : c));
+        setStep((s) => s + 1);
+      }, 1800);
       return;
     }
-    // On success or error, advance to the next modal. The card surface
-    // (UpsellSections) shows inline confirmation; the popup is more
-    // ephemeral so we just move on.
+
+    // Anything else — including the requiresCheckout edge case — silently
+    // skips. We never bounce the user out of the popup to /checkout
+    // because their card is already on file from the intro fee.
     setStep((s) => s + 1);
   }
 
@@ -363,20 +404,73 @@ export function UpsellPopupSequence({ ids, analysisId }: UpsellPopupSequenceProp
     setStep((s) => s + 1);
   }
 
+  function handleConfirmContinue() {
+    setConfirmedUpsell(null);
+    setStep((s) => s + 1);
+  }
+
   const current = step >= 0 && step < list.length ? list[step] : null;
 
   return (
     <>
-      <div ref={sentinelRef} aria-hidden className="h-px w-full" />
-      {current && (
+      {!triggerOnMount && (
+        <div ref={sentinelRef} aria-hidden className="h-px w-full" />
+      )}
+      {confirmedUpsell ? (
+        <UpsellConfirmedModal upsell={confirmedUpsell} onContinue={handleConfirmContinue} />
+      ) : current ? (
         <UpsellModal
           upsell={current}
           busy={busy === current.id}
           onAccept={handleAccept}
           onDecline={handleDecline}
         />
-      )}
+      ) : null}
     </>
+  );
+}
+
+function UpsellConfirmedModal({
+  upsell,
+  onContinue,
+}: {
+  upsell: Upsell;
+  onContinue: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--color-bg-overlay)] sm:items-center sm:p-4"
+      onClick={onContinue}
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-t-[28px] bg-white p-7 sm:rounded-[28px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-center">
+          <div
+            className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
+            style={{ background: "var(--color-green)" }}
+          >
+            <span className="text-3xl font-bold text-white">✓</span>
+          </div>
+          <p
+            className="mb-1 text-[11px] font-bold uppercase tracking-wider"
+            style={{ color: upsell.accent }}
+          >
+            {upsell.subtitle}
+          </p>
+          <h2 className="mb-2 font-display text-2xl font-bold leading-tight text-[var(--color-ink)]">
+            {upsell.title} — added!
+          </h2>
+          <p className="mb-5 text-sm leading-relaxed text-[var(--color-ink-soft)]">
+            We charged your card on file. You&apos;ll find it on your dashboard.
+          </p>
+          <Button size="block" onClick={onContinue}>
+            Continue
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

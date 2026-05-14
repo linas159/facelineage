@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     amount: price.unit_amount,
     currency: price.currency,
     customer: customerId,
-    automatic_payment_methods: { enabled: true },
+    payment_method_types: ["card"],
     description: sku,
     metadata: {
       kind: "upsell",

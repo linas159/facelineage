@@ -96,54 +96,66 @@ async function handleIntroFeePaid(
   const md = pi.metadata ?? {};
   const plan = md.plan as PlanKey | undefined;
   const analysisId = md.analysis_id;
-  const email = md.email ?? pi.receipt_email ?? undefined;
   if (!plan || !PLANS[plan]) return;
 
-  // The user is created lazily — either by /payment-complete or here if the
-  // browser never finished the redirect (closed tab, etc.). Either way we
-  // claim the analysis and start the pipeline.
-  let userId = md.supabase_user_id as string | undefined;
-  if (!userId && email) {
-    const { data: list } = await db.auth.admin.listUsers();
-    const existing = list?.users.find(
-      (u) => u.email?.toLowerCase() === email.toLowerCase(),
-    );
-    if (existing) {
-      userId = existing.id;
-    } else {
-      const { data: created } = await db.auth.admin.createUser({
-        email,
-        email_confirm: true,
-      });
-      if (created?.user) userId = created.user.id;
-    }
+  // 1. Get the email from the PaymentMethod's billing_details. The PI was
+  // created with an empty-email customer; the PM was attached to that
+  // customer via setup_future_usage during confirmation (so no manual
+  // attach is needed — and would actually fail with "PM was previously
+  // used without being attached").
+  const paymentMethodId =
+    typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
+  const customerId = typeof pi.customer === "string" ? pi.customer : pi.customer?.id;
+  if (!paymentMethodId || !customerId) {
+    console.error(`Intro fee PI ${pi.id}: missing payment_method or customer`);
+    return;
+  }
+
+  const pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+  const email = pm.billing_details?.email ?? pi.receipt_email ?? undefined;
+  if (!email) {
+    console.error(`Intro fee PI ${pi.id}: no email in payment_method billing_details`);
+    return;
+  }
+
+  // 2. Find or create the Supabase user.
+  let userId: string | undefined;
+  const { data: list } = await db.auth.admin.listUsers();
+  const existing = list?.users.find(
+    (u) => u.email?.toLowerCase() === email.toLowerCase(),
+  );
+  if (existing) {
+    userId = existing.id;
+  } else {
+    const { data: created } = await db.auth.admin.createUser({
+      email,
+      email_confirm: true,
+    });
+    if (created?.user) userId = created.user.id;
   }
   if (!userId) return;
 
+  // 3. Fill in the email + supabase id on the customer, and make this PM
+  // the default for invoices (so the trial-end invoice charges it).
+  await stripe.customers.update(customerId, {
+    email,
+    metadata: { source: "facelineage_checkout", supabase_user_id: userId },
+    invoice_settings: { default_payment_method: paymentMethodId },
+  });
+
+  // 5. Plan-specific setup follows.
   const planMeta = PLANS[plan];
   const recurringSku = planMeta.recurringInterval === "week" ? "recur_week" : "recur_month";
   const recurringPriceId = priceIdFor(recurringSku);
-  const customerId = typeof pi.customer === "string" ? pi.customer : pi.customer?.id;
-  if (!customerId) return;
 
-  const paymentMethodId =
-    typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
-
-  // Make the captured PM the default so the trial-end invoice charges it.
-  if (paymentMethodId) {
-    await stripe.customers.update(customerId, {
-      invoice_settings: { default_payment_method: paymentMethodId },
-    });
-  }
-
-  // Idempotency: if we already created a sub for this PI, do nothing.
-  const { data: existing } = await db
+  // Idempotency: if we already created a sub for this user, do nothing.
+  const { data: existingSub } = await db
     .from("subscriptions")
     .select("stripe_subscription_id")
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (existing?.stripe_subscription_id) {
+  if (existingSub?.stripe_subscription_id) {
     // Already provisioned by an earlier delivery of this event.
   } else {
     const newSub = await stripe.subscriptions.create({

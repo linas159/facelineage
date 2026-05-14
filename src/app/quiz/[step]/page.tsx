@@ -100,11 +100,29 @@ export default async function QuizStepPage({ params }: { params: Promise<{ step:
   const next = stepNum >= QUIZ_STEPS.length ? "/capture" : `/quiz/${stepNum + 1}`;
   const back = stepNum > 1 ? `/quiz/${stepNum - 1}` : "/";
 
+  // Build the list of images the next page will need so we can warm them
+  // in the browser cache before the user taps. If next is /capture, the
+  // hero selfie illustration is the heaviest above-the-fold asset.
+  let prefetchImages: string[];
+  if (stepNum >= QUIZ_STEPS.length) {
+    prefetchImages = ["/selfie.png"];
+  } else {
+    const nextStep = QUIZ_STEPS.find((q) => q.id === stepNum + 1);
+    prefetchImages = (nextStep?.options ?? [])
+      .map((o) => o.iconSrc)
+      .filter((s): s is string => !!s);
+  }
+
   return (
     <FunnelShell step={stepNum} totalSteps={QUIZ_STEPS.length} showBack backHref={back}>
       <div className="pt-8">
         <h2 className="mb-8 text-balance">{data.q}</h2>
-        <QuizOptions questionKey={data.key} options={data.options} nextHref={next} />
+        <QuizOptions
+          questionKey={data.key}
+          options={data.options}
+          nextHref={next}
+          prefetchImages={prefetchImages}
+        />
       </div>
     </FunnelShell>
   );

@@ -42,6 +42,14 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   ) {
     const initialStatus =
       report.status === "idle" ? "queued" : (report.status as "queued" | "running" | "failed");
+    const unownedIds = (["parents", "ethnicity", "ages", "partner", "book"] as UpsellId[]).filter(
+      (uiId) => {
+        const sku = (Object.keys(SKU_TO_UI_ID) as UpsellSku[]).find(
+          (s) => SKU_TO_UI_ID[s] === uiId,
+        );
+        return sku ? !(report.upsells[sku] && report.upsells[sku]!.length > 0) : true;
+      },
+    );
     return (
       <FunnelShell>
         <div className="pt-6 text-center">
@@ -58,6 +66,15 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
           initialStatus={initialStatus}
           initialError={report.errorMessage}
         />
+        {/* Upsell popup fires immediately while the user waits — perfect
+            captive moment to surface add-ons. */}
+        {unownedIds.length > 0 && (
+          <UpsellPopupSequence
+            analysisId={id}
+            ids={unownedIds}
+            triggerOnMount
+          />
+        )}
       </FunnelShell>
     );
   }
@@ -222,21 +239,6 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
         </Link>
       </div>
 
-      {/* Upsell popup sequence — fires when the user scrolls near the bottom.
-          Filtered to SKUs the user hasn't already purchased. */}
-      {report.status !== "demo" && (
-        <UpsellPopupSequence
-          analysisId={id}
-          ids={
-            (["parents", "ethnicity", "ages", "partner", "book"] as UpsellId[]).filter((uiId) => {
-              const sku = (Object.keys(SKU_TO_UI_ID) as UpsellSku[]).find(
-                (s) => SKU_TO_UI_ID[s] === uiId,
-              );
-              return sku ? !(report.upsells[sku] && report.upsells[sku]!.length > 0) : true;
-            })
-          }
-        />
-      )}
     </FunnelShell>
   );
 }

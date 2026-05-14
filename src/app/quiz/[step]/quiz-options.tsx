@@ -13,6 +13,10 @@ interface QuizOptionsProps {
   questionKey: string;   // e.g. "gender", "motivation"
   options: Option[];
   nextHref: string;
+  /** Image URLs to warm in the browser cache so the next page renders
+   *  instantly. Plain `<img>` tags don't get prefetched by Next.js — we
+   *  trigger a manual fetch via `new Image()`. */
+  prefetchImages?: string[];
 }
 
 const STORAGE_KEY = "fl_quiz_answers";
@@ -23,14 +27,18 @@ const STORAGE_KEY = "fl_quiz_answers";
  * page reads STORAGE_KEY when the user uploads their selfie and includes
  * the answers in the analysis row.
  */
-export function QuizOptions({ questionKey, options, nextHref }: QuizOptionsProps) {
+export function QuizOptions({ questionKey, options, nextHref, prefetchImages }: QuizOptionsProps) {
   const router = useRouter();
 
-  // Warm up the next route while the user is still picking — kills the
-  // "click, wait 800ms, see new page" feeling on Vercel.
+  // Warm up the next route AND its images while the user is still picking —
+  // kills the "click, wait 800ms, see new page + blank image slots" feel.
   useEffect(() => {
     router.prefetch(nextHref);
-  }, [router, nextHref]);
+    prefetchImages?.forEach((src) => {
+      const img = new window.Image();
+      img.src = src;
+    });
+  }, [router, nextHref, prefetchImages]);
 
   function record(label: string) {
     try {
