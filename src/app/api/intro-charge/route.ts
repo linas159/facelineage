@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { stripe, PLANS, priceIdFor, type PlanKey } from "@/lib/stripe";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { provisionIntroPayment } from "@/lib/provisioning";
+
+export const maxDuration = 300;
 
 /**
  * POST /api/intro-charge
@@ -118,6 +121,24 @@ export async function POST(req: NextRequest) {
       payment_method: savedPmId,
     });
     if (confirmed.status === "succeeded") {
+      // Run the same provisioning the webhook would (idempotent if it
+      // also fires). User exists already so we pass user.id directly.
+      try {
+        const pm = await stripe.paymentMethods.retrieve(savedPmId);
+        await provisionIntroPayment({
+          pi: confirmed,
+          pm,
+          subscription,
+          email: user.email ?? customer.email ?? "",
+          userId: user.id,
+          analysisId,
+          plan,
+          db: createServiceClient(),
+        });
+      } catch (provErr) {
+        console.error("[intro-charge] provisioning failed:", provErr);
+        // Don't fail the response — webhook will reconcile.
+      }
       return NextResponse.json({ success: true });
     }
     if (confirmed.status === "requires_action" && confirmed.client_secret) {

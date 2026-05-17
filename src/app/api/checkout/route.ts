@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   const db = createServiceClient();
   const { data: analysis } = await db
     .from("analyses")
-    .select("id, user_id")
+    .select("id, user_id, email")
     .eq("id", analysisId)
     .maybeSingle();
   if (!analysis) {
@@ -47,7 +47,10 @@ export async function POST(req: NextRequest) {
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
+  // Email is collected on /email before the paywall, so we can attach it
+  // up-front. Stripe uses it for receipts + PayPal billing agreements.
   const customer = await stripe.customers.create({
+    email: analysis.email ?? undefined,
     metadata: {
       source: "facelineage_checkout",
       analysis_id: analysisId,

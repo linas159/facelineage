@@ -84,3 +84,25 @@ export const PLANS = {
 } as const;
 
 export type PlanKey = keyof typeof PLANS;
+
+/**
+ * Resolve the customer's email from a Stripe PaymentMethod + PaymentIntent.
+ * Different payment method types stash the email in different places:
+ *   - card:     billing_details.email (we collect it in the form)
+ *   - paypal:   paypal.payer_email    (PayPal returns it after authorization)
+ *   - link:     link.email
+ *   - wallets:  billing_details.email (auto-filled by Apple/Google Pay)
+ * Falls back to pi.receipt_email if all PM fields are blank.
+ */
+export function resolveCustomerEmail(
+  pm: import("stripe").Stripe.PaymentMethod,
+  pi?: import("stripe").Stripe.PaymentIntent | null,
+): string | undefined {
+  const billing = pm.billing_details?.email ?? undefined;
+  if (billing) return billing;
+  const paypal = pm.paypal?.payer_email ?? undefined;
+  if (paypal) return paypal;
+  const link = pm.link?.email ?? undefined;
+  if (link) return link;
+  return pi?.receipt_email ?? undefined;
+}

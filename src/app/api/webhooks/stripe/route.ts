@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import type Stripe from "stripe";
-import { stripe, priceIdFor, PLANS, type PlanKey } from "@/lib/stripe";
+import { stripe, PLANS, resolveCustomerEmail, type PlanKey } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
-import { runMainPipeline, runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
-import { sendReportReadyEmail } from "@/lib/email/send";
+import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
+import { recordPurchase } from "@/lib/purchases";
+import { provisionIntroPayment } from "@/lib/provisioning";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -206,17 +207,28 @@ async function handleInvoicePaid(
   console.log(`[invoice.paid] pmId=${pmId}`);
 
   const pm = await stripe.paymentMethods.retrieve(pmId);
-  const email = pm.billing_details?.email ?? pi.receipt_email ?? undefined;
-  console.log(`[invoice.paid] email=${email ?? "(none)"}`);
+  // Prefer the email we collected on /email pre-paywall — it's the most
+  // reliable source. Fall back to PM/PI for any legacy flow.
+  let email: string | undefined;
+  if (analysisId) {
+    const { data: row } = await db
+      .from("analyses")
+      .select("email")
+      .eq("id", analysisId)
+      .maybeSingle();
+    email = row?.email ?? undefined;
+  }
+  if (!email) email = resolveCustomerEmail(pm, pi);
+  console.log(`[invoice.paid] pmType=${pm.type} email=${email ?? "(none)"}`);
   if (!email) {
     console.error(`[invoice.paid] no email in billing_details`);
     return;
   }
 
-  const customerId =
-    typeof subscription.customer === "string"
-      ? subscription.customer
-      : subscription.customer.id;
+  if (!analysisId) {
+    console.log(`[invoice.paid] no analysisId in metadata — skipping`);
+    return;
+  }
 
   // 2. Find or create the Supabase user.
   let userId: string | undefined;
@@ -239,122 +251,30 @@ async function handleInvoicePaid(
   }
   console.log(`[invoice.paid] userId=${userId}`);
 
-  // 3. Backfill email + supabase id on the customer, AND set the winning
-  // PaymentMethod as the customer's default. `save_default_payment_method:
-  // "on_subscription"` only sets the PM on the subscription — without this
-  // mirror to the customer, off-session upsell charges can't find it.
-  await stripe.customers.update(customerId, {
-    email,
-    metadata: { source: "facelineage_checkout", supabase_user_id: userId },
-    invoice_settings: { default_payment_method: pmId },
-  });
-
-  // 4. Persist the live subscription row.
-  await db.from("subscriptions").upsert({
-    user_id: userId,
-    stripe_customer_id: customerId,
-    stripe_subscription_id: subscription.id,
-    product_sku: plan,
-    status: subscription.status as
-      | "trialing"
-      | "active"
-      | "past_due"
-      | "canceled"
-      | "incomplete",
-    current_period_start: epochToIso(subscription.current_period_start),
-    current_period_end: epochToIso(subscription.current_period_end),
-  });
-
-  // 5. Record the intro purchase.
-  await recordPurchase(db, {
-    user_id: userId,
-    analysis_id: analysisId ?? null,
-    product_sku: plan,
-    stripe_payment_intent: pi.id,
-    amount_cents: invoice.amount_paid,
-    currency: invoice.currency,
-  });
-
-  // 6. Cancel the sibling subscription(s) — the customer has up to one
-  // other incomplete sub with the same analysis_id (the flow the user
-  // didn't pick). Look it up by listing the customer's subs instead of
-  // relying on cross-linked metadata (saves a round-trip at checkout time).
-  try {
-    const otherSubs = await stripe.subscriptions.list({
-      customer: customerId,
-      status: "incomplete",
-      limit: 10,
-    });
-    for (const other of otherSubs.data) {
-      if (other.id === subscription.id) continue;
-      if (other.metadata?.analysis_id !== analysisId) continue;
-      try {
-        await stripe.subscriptions.cancel(other.id);
-      } catch {
-        // already canceled / already gone — fine
-      }
-    }
-  } catch (err) {
-    console.error("Sibling-cancel lookup failed:", err);
-  }
-  // siblingSubId from metadata is now unused but kept for backward
-  // compatibility if any older subs still carry it.
+  // Belt-and-suspenders: this exact flow also runs from /payment-complete
+  // and /api/intro-charge. Each call is fully idempotent — race-safe.
+  // The metadata.flow=card sibling is unused; legacy field still in
+  // metadata for older subs is intentionally ignored.
   void siblingSubId;
-
-  // 7. Mark analysis paid + fire the AI pipeline asynchronously.
-  if (analysisId) {
-    const { error: updErr } = await db
-      .from("analyses")
-      .update({ is_paid: true, generation_status: "queued" })
-      .eq("id", analysisId);
-    if (updErr) {
-      console.error(`[invoice.paid] failed to mark analysis paid:`, updErr);
-    } else {
-      console.log(`[invoice.paid] analysis ${analysisId} marked paid + queued`);
-    }
-
-    // Snapshot the values the email needs — `after()` runs on a different
-    // tick, after we've already returned to Stripe.
-    const planMeta = PLANS[plan];
-    const cardLast4 = pm.type === "card" ? pm.card?.last4 ?? undefined : undefined;
-    const trialEndsEpoch = subscription.trial_end ?? null;
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://facelineage.com";
-
-    after(async () => {
-      console.log(`[after] Starting main pipeline for analysis=${analysisId}`);
-      try {
-        await runMainPipeline(analysisId);
-        console.log(`[after] Main pipeline complete for analysis=${analysisId}`);
-      } catch (err) {
-        console.error(`[after] Main pipeline failed for analysis=${analysisId}:`, err);
-        return; // Don't email a broken report
-      }
-
-      try {
-        await sendReportReadyEmail(email, {
-          reportUrl: `${baseUrl}/report/${analysisId}`,
-          amountPaid: planMeta.introPrice,
-          paymentDate: new Date().toLocaleDateString("en-US", {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-          }),
-          cardLast4,
-          trialEnds: trialEndsEpoch
-            ? new Date(trialEndsEpoch * 1000).toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })
-            : "the end of your trial",
-          recurringAmount: `${planMeta.recurringPrice}/${planMeta.recurringPeriod}`,
-        });
-      } catch (err) {
-        console.error(`[after] email send failed for ${email}:`, err);
-      }
-    });
-  } else {
-    console.log(`[invoice.paid] no analysisId in metadata — skipping pipeline`);
+  await provisionIntroPayment({
+    pi,
+    pm,
+    subscription,
+    email,
+    userId,
+    analysisId,
+    plan,
+    db,
+  });
+  // Stamp invoice.amount_paid on the purchase record (PI.amount may be 0
+  // on subscription invoices in some Stripe API states). Idempotent: the
+  // shared recordPurchase already inserted; this just normalizes amount
+  // if the recorded value is 0 but the invoice says otherwise.
+  if (invoice.amount_paid && invoice.amount_paid !== pi.amount) {
+    await db
+      .from("purchases")
+      .update({ amount_cents: invoice.amount_paid })
+      .eq("stripe_payment_intent", pi.id);
   }
 }
 
@@ -394,44 +314,6 @@ async function handleUpsellPaid(
       console.error(`[after] Upsell pipeline failed for ${sku} on analysis ${analysisId}:`, err);
     }
   });
-}
-
-/**
- * Insert a purchase row, idempotent on stripe_payment_intent. Works without
- * a unique index — we look up first, then insert if missing.
- */
-async function recordPurchase(
-  db: ReturnType<typeof createServiceClient>,
-  fields: {
-    user_id: string | null;
-    analysis_id: string | null;
-    product_sku: string;
-    stripe_payment_intent: string;
-    amount_cents: number | null;
-    currency: string | null;
-  },
-): Promise<string | null> {
-  const { data: existing } = await db
-    .from("purchases")
-    .select("id")
-    .eq("stripe_payment_intent", fields.stripe_payment_intent)
-    .maybeSingle();
-  if (existing?.id) return existing.id;
-
-  const { data: inserted, error } = await db
-    .from("purchases")
-    .insert({
-      ...fields,
-      status: "paid",
-      fulfilled_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-  if (error || !inserted) {
-    console.error("recordPurchase insert failed:", error);
-    return null;
-  }
-  return inserted.id;
 }
 
 function customerIdFromSubscription(sub: Stripe.Subscription): string {

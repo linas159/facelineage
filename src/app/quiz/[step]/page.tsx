@@ -89,6 +89,19 @@ const QUIZ_STEPS: Step[] = [
       { label: "55+",   emoji: "🪶", iconSrc: "/quiz/q5-ancient-tree.png" },
     ],
   },
+
+  // ── 6 — heritage roots (drives the prompt-side weighting) ───────────────
+  {
+    id: 6,
+    key: "heritage_roots",
+    q: "What do you know about your family's roots?",
+    options: [
+      { label: "Same country as me, going back generations", emoji: "🏡", iconSrc: "/quiz/q6-roots.png" },
+      { label: "One or both parents came from somewhere else", emoji: "✈️", iconSrc: "/quiz/q6-suitcase.png" },
+      { label: "My family is a mix of several places", emoji: "🎨", iconSrc: "/quiz/q4-swirl.png" },
+      { label: "Honestly, no idea", emoji: "❔", iconSrc: "/quiz/q6-question.png" },
+    ],
+  },
 ];
 
 export default async function QuizStepPage({ params }: { params: Promise<{ step: string }> }) {

@@ -72,8 +72,10 @@ export function AnalyzingClient({ analysisId }: { analysisId?: string }) {
           setPaused(true);
           setQuestionIdx(phase);
         } else {
-          // Final phase done — straight to paywall (guest-friendly).
-          setTimeout(() => router.push("/paywall"), 700);
+          // Final phase done — collect email before paywall so we know
+          // who's buying before they hit Stripe (simplifies provisioning
+          // and rules out post-pay "couldn't link account" failures).
+          setTimeout(() => router.push("/email"), 700);
         }
       }
     }, TICK_MS);

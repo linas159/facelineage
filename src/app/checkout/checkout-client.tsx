@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PLANS, type PlanKey } from "@/lib/stripe";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
+import { PayPalButton } from "@/components/paypal-button";
 
 type Mode = "intro" | "upsell";
 type UpsellId = "parents" | "ethnicity" | "ages" | "partner" | "book";
@@ -182,9 +183,12 @@ export function CheckoutClient(props: CheckoutClientProps) {
         </Card>
       )}
 
-      {/* Wallets — Express Checkout (PayPal, Apple Pay, Google Pay, Link).
-          Uses its own Elements provider tied to the wallets-PI clientSecret
-          so PayPal can render. */}
+      {/* Wallets — Express Checkout (Apple Pay, Google Pay, Link) plus our
+          custom PayPal button. Stripe filters PayPal out of
+          ExpressCheckoutElement unless the account has "PayPal Vault for
+          Subscriptions" approval (gated, separate from the basic
+          recurring approval), so we render PayPal ourselves and call
+          stripe.confirmPayment directly with type="paypal". */}
       {init && stripePromise && (init.walletsClientSecret || init.clientSecret) && (
         <Elements
           stripe={stripePromise}
@@ -193,7 +197,13 @@ export function CheckoutClient(props: CheckoutClientProps) {
             appearance: APPEARANCE,
           }}
         >
-          <ExpressSection redirectTarget={redirectTarget} />
+          <div className="space-y-2">
+            <ExpressSection redirectTarget={redirectTarget} />
+            <PayPalButton
+              clientSecret={init.walletsClientSecret ?? init.clientSecret!}
+              returnUrl={redirectTarget}
+            />
+          </div>
         </Elements>
       )}
 
@@ -299,16 +309,10 @@ function CardSection({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [paymentType, setPaymentType] = useState<string | null>(null);
-  const [email, setEmail] = useState("");
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!stripe || !elements) return;
-    if (paymentType === "card" && !email) {
-      setError("Please enter your email so we can send you the report.");
-      return;
-    }
     setBusy(true);
     setError(null);
     const { error: err } = await stripe.confirmPayment({
@@ -317,7 +321,8 @@ function CardSection({
         return_url: redirectTarget,
         payment_method_data: {
           billing_details: {
-            email: email || undefined,
+            // Email is already on the Stripe Customer (collected on /email),
+            // so we don't need to pass it again. Name/phone are not collected.
             name: "",
             phone: "",
             // Every address sub-field set to "never" on the PaymentElement
@@ -346,7 +351,6 @@ function CardSection({
     <form onSubmit={onSubmit} className="space-y-4">
       <Card className="!p-3">
         <PaymentElement
-          onChange={(e) => setPaymentType(e.value?.type ?? null)}
           options={{
             layout: "tabs",
             wallets: { applePay: "never", googlePay: "never", link: "never" },
@@ -380,22 +384,6 @@ function CardSection({
             },
           }}
         />
-
-        {paymentType === "card" && (
-          <div className="mt-4">
-            <label className="mb-1.5 block text-[13px] text-[var(--color-ink-soft)]">
-              Email
-            </label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="h-11 w-full rounded-[12px] border border-[var(--color-line-strong)] bg-white px-3 text-base text-[var(--color-ink)] placeholder:text-[var(--color-ink-faint)] focus:border-[var(--color-orange)] focus:outline-none focus:ring-1 focus:ring-[var(--color-orange)]"
-            />
-          </div>
-        )}
       </Card>
 
       {error && (

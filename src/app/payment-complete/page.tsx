@@ -1,11 +1,13 @@
 import { redirect } from "next/navigation";
 import type Stripe from "stripe";
-import { stripe } from "@/lib/stripe";
+import { stripe, resolveCustomerEmail, PLANS, type PlanKey } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
+import { provisionIntroPayment } from "@/lib/provisioning";
 import { FunnelShell } from "@/components/funnel-shell";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 type SearchParams = {
   payment_intent?: string;
@@ -49,21 +51,32 @@ export default async function PaymentCompletePage({
     return failed(`Payment is ${pi.status}. Please try again or contact support.`);
   }
 
-  // Email lives on the PaymentMethod's billing_details (wallet auto-fills it;
-  // card form collects it inline). Fall back to receipt_email just in case.
+  // Prefer the email collected on /email — most reliable. Fall back to
+  // PaymentMethod fields for any legacy purchases that skipped /email.
   let email: string | undefined;
-  const pmId = typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
-  if (pmId) {
-    try {
-      const pm = await stripe.paymentMethods.retrieve(pmId);
-      email = pm.billing_details?.email ?? undefined;
-    } catch {
-      // ignore — fall through to receipt_email
+  const analysisId = pi.metadata?.analysis_id ?? params.analysis;
+  if (analysisId) {
+    const svc = createServiceClient();
+    const { data: row } = await svc
+      .from("analyses")
+      .select("email")
+      .eq("id", analysisId)
+      .maybeSingle();
+    email = row?.email ?? undefined;
+  }
+  if (!email) {
+    const pmId = typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
+    if (pmId) {
+      try {
+        const pm = await stripe.paymentMethods.retrieve(pmId);
+        email = resolveCustomerEmail(pm, pi);
+      } catch {
+        // ignore — fall through to receipt_email
+      }
     }
   }
   if (!email) email = pi.receipt_email ?? undefined;
 
-  const analysisId = pi.metadata?.analysis_id ?? params.analysis;
   if (!email || !analysisId) {
     return failed("Payment confirmed but we couldn't link it to your account. Please contact support.");
   }
@@ -77,12 +90,58 @@ export default async function PaymentCompletePage({
     return failed("Couldn't provision your account. Please contact support.");
   }
 
-  // 3. Claim the analysis row + mark paid + queue the pipeline (webhook
-  // may have already done this; everything below is idempotent).
-  await db
-    .from("analyses")
-    .update({ user_id: user.id, is_paid: true, generation_status: "queued" })
-    .eq("id", analysisId);
+  // 3. Resolve the subscription + PM that own this PI, then run the
+  // shared post-payment provisioning. This is the same logic the Stripe
+  // webhook uses — having both run is safe (every step is idempotent)
+  // and means upsells/email/pipeline work even when the webhook is
+  // unreachable (localhost) or delayed.
+  try {
+    const pmId =
+      typeof pi.payment_method === "string"
+        ? pi.payment_method
+        : pi.payment_method?.id;
+    const invoiceRef = pi.invoice;
+    const invoiceId =
+      typeof invoiceRef === "string" ? invoiceRef : invoiceRef?.id;
+    if (pmId && invoiceId) {
+      const invoice = await stripe.invoices.retrieve(invoiceId);
+      const parent = (invoice as unknown as {
+        parent?: {
+          subscription_details?: { subscription?: string | { id: string } | null };
+        };
+      }).parent;
+      const newRef = parent?.subscription_details?.subscription ?? null;
+      const legacyRef = invoice.subscription;
+      let subscriptionId: string | undefined;
+      if (typeof legacyRef === "string") subscriptionId = legacyRef;
+      else if (legacyRef && typeof legacyRef === "object") subscriptionId = legacyRef.id;
+      if (!subscriptionId) {
+        if (typeof newRef === "string") subscriptionId = newRef;
+        else if (newRef && typeof newRef === "object") subscriptionId = newRef.id;
+      }
+      if (subscriptionId) {
+        const [pm, subscription] = await Promise.all([
+          stripe.paymentMethods.retrieve(pmId),
+          stripe.subscriptions.retrieve(subscriptionId),
+        ]);
+        const planMeta = subscription.metadata?.plan as PlanKey | undefined;
+        const plan = planMeta && PLANS[planMeta] ? planMeta : "sub_intro_3d";
+        await provisionIntroPayment({
+          pi,
+          pm,
+          subscription,
+          email,
+          userId: user.id,
+          analysisId,
+          plan,
+          db,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[payment-complete] provisioning failed:", err);
+    // Don't fail the page — webhook will reconcile.
+  }
 
   // (The pre-auth cookie is cleared by /auth/confirm — page components
   // can't write cookies in Next.js 15.)

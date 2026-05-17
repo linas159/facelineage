@@ -306,11 +306,11 @@ function UpsellModal({ upsell, busy, onAccept, onDecline }: UpsellModalProps) {
               </span>
             </span>
             <span className="flex items-baseline gap-2">
-              <span className="font-display text-3xl font-bold tabular text-[var(--color-ink-muted)] line-through decoration-[var(--color-coral)] decoration-2">
+              <span className="font-display text-base font-bold tabular text-[var(--color-ink-muted)] line-through decoration-[var(--color-coral)] decoration-2">
                 {upsell.originalPrice}
               </span>
               <span
-                className="font-display text-xl font-bold tabular"
+                className="font-display text-3xl font-extrabold tabular"
                 style={{ color: upsell.accent }}
               >
                 {upsell.price}

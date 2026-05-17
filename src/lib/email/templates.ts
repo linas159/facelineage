@@ -171,6 +171,71 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
   return { subject, html, text };
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Trial-ending reminder — sent ~24h before the recurring charge
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface TrialEndingEmailVars {
+  chargeDate: string;       // "May 18, 2026"
+  recurringAmount: string;  // "$24.99/week"
+  manageUrl: string;        // https://facelineage.com/account
+}
+
+export function renderTrialEndingEmail(v: TrialEndingEmailVars): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const subject = `Heads up — your Facelineage subscription renews tomorrow`;
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><title>${subject}</title></head>
+<body style="margin:0;padding:0;background:${BRAND.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.ink};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.bg};padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
+        <tr><td style="background:linear-gradient(135deg,${BRAND.violet} 0%,${BRAND.magenta} 100%);border-radius:24px 24px 0 0;padding:36px 28px;text-align:center;">
+          <div style="font-size:13px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.85);">Facelineage</div>
+          <div style="margin-top:14px;font-size:26px;font-weight:800;color:#fff;line-height:1.2;">Your trial ends tomorrow</div>
+        </td></tr>
+        <tr><td style="background:${BRAND.cardBg};border-radius:0 0 24px 24px;padding:32px 28px;">
+          <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;color:${BRAND.inkSoft};">
+            Just a heads-up: your Facelineage trial ends on <strong style="color:${BRAND.ink};">${escape(v.chargeDate)}</strong>.
+            We&rsquo;ll then charge <strong style="color:${BRAND.ink};">${escape(v.recurringAmount)}</strong> using the payment method on file.
+          </p>
+          <p style="margin:0 0 22px 0;font-size:15px;line-height:1.6;color:${BRAND.inkSoft};">
+            Want to keep going? You don&rsquo;t need to do anything. Want to stop? Cancel anytime in one tap from your account — no questions, no charge tomorrow.
+          </p>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr><td align="center" style="padding:6px 0 8px 0;">
+              <a href="${escape(v.manageUrl)}" style="display:inline-block;padding:14px 28px;background:${BRAND.violet};color:#fff;font-size:15px;font-weight:700;text-decoration:none;border-radius:14px;box-shadow:0 4px 16px rgba(124,92,255,0.3);">
+                Manage subscription
+              </a>
+            </td></tr>
+          </table>
+          <p style="margin:18px 0 0 0;font-size:12px;line-height:1.6;color:${BRAND.inkMuted};text-align:center;">
+            Questions? Reply to this email or write to <a href="mailto:support@facelineage.com" style="color:${BRAND.violet};text-decoration:none;font-weight:600;">support@facelineage.com</a>.
+          </p>
+        </td></tr>
+        <tr><td style="padding:18px 16px 0 16px;text-align:center;font-size:12px;color:${BRAND.inkMuted};">
+          © ${new Date().getFullYear()} Facelineage
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  const text = [
+    "Your Facelineage trial ends tomorrow.",
+    "",
+    `On ${v.chargeDate}, we'll charge ${v.recurringAmount} unless you cancel.`,
+    `Manage subscription: ${v.manageUrl}`,
+    "",
+    "Questions? support@facelineage.com",
+  ].join("\n");
+  return { subject, html, text };
+}
+
 function row(icon: string, title: string, desc: string): string {
   return `<tr>
     <td valign="top" style="padding:6px 0;width:36px;font-size:20px;">${icon}</td>

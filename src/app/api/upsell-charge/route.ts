@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import type Stripe from "stripe";
 import { stripe, priceIdFor, UPSELL_SKU_BY_UI_ID } from "@/lib/stripe";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { recordPurchase } from "@/lib/purchases";
+import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
+
+export const maxDuration = 300;
 
 /**
  * POST /api/upsell-charge
@@ -131,8 +136,35 @@ export async function POST(req: NextRequest) {
     });
 
     if (pi.status === "succeeded") {
-      // Webhook will record the purchase + fire the pipeline. We can return
-      // optimistically since the metadata is intact.
+      // Belt-and-suspenders: record + fire pipeline here too. The webhook
+      // does the same in production, but on localhost (no `stripe listen`)
+      // it never fires and the user would see "success" with no artifacts.
+      // Both writes are idempotent (recordPurchase dedupes by PI id, and
+      // runUpsellPipeline skips when artifacts already exist).
+      const svc = createServiceClient();
+      const purchaseId = await recordPurchase(svc, {
+        user_id: user.id,
+        analysis_id: analysisId,
+        product_sku: sku,
+        stripe_payment_intent: pi.id,
+        amount_cents: pi.amount,
+        currency: pi.currency,
+      });
+      if (purchaseId) {
+        after(async () => {
+          console.log(`[upsell-charge] firing pipeline sku=${sku} analysis=${analysisId}`);
+          try {
+            await runUpsellPipeline({
+              sku: sku as UpsellSku,
+              analysisId,
+              purchaseId,
+            });
+            console.log(`[upsell-charge] pipeline done sku=${sku} analysis=${analysisId}`);
+          } catch (err) {
+            console.error(`[upsell-charge] pipeline failed sku=${sku}:`, err);
+          }
+        });
+      }
       return NextResponse.json({ success: true });
     }
     if (pi.status === "requires_action") {

@@ -66,6 +66,29 @@ export async function runMainPipeline(analysisId: string): Promise<void> {
     });
     console.log(`[pipeline] Claude done in ${Date.now() - claudeStart}ms, regions=${result.regions.length}`);
 
+    const userId = row.user_id ?? "shared";
+
+    // 3. Generate the ancestor portrait. Cultural insights stay text-only
+    // for now (we don't generate per-user images for those — too costly).
+    console.log(`[pipeline] generating ancestor portrait…`);
+    const imgStart = Date.now();
+    const ancestorBytes = await generateImage({
+      prompt: result.ancestor.image_prompt,
+      referenceImageBase64: selfieBase64,
+      referenceMediaType: selfie.mediaType,
+      aspect: "4:5",
+    });
+    console.log(`[pipeline] portrait done in ${Date.now() - imgStart}ms, ${ancestorBytes.length} bytes`);
+
+    // 4. Upload the portrait to private storage; we sign URLs at read time.
+    console.log(`[pipeline] uploading portrait…`);
+    const ancestorPath = await uploadGenerated(
+      db,
+      `${userId}/${analysisId}/ancestor-${randomUUID()}.png`,
+      ancestorBytes,
+    );
+    console.log(`[pipeline] portrait uploaded → ${ancestorPath}`);
+
     const insightsWithPaths = result.cultural_insights.map((ci) => ({
       ...ci,
       image_path: null,
@@ -73,7 +96,7 @@ export async function runMainPipeline(analysisId: string): Promise<void> {
 
     const persistAncestor = {
       ...result.ancestor,
-      image_path: null,
+      image_path: ancestorPath,
     };
 
     console.log(`[pipeline] persisting analysis row…`);
@@ -126,6 +149,23 @@ export async function runUpsellPipeline(opts: {
   analysisId: string;
   purchaseId: string;
 }): Promise<void> {
+  // Idempotency guard: if artifacts already exist for this sku on this
+  // analysis, the pipeline has already run (likely via the webhook OR via
+  // the /api/upsell-charge fallback). Skip — both paths can safely race.
+  const db = createServiceClient();
+  const { data: existing } = await db
+    .from("upsell_artifacts")
+    .select("id")
+    .eq("analysis_id", opts.analysisId)
+    .eq("product_sku", opts.sku)
+    .limit(1);
+  if (existing && existing.length > 0) {
+    console.log(
+      `[runUpsellPipeline] artifacts already exist for ${opts.sku} on ${opts.analysisId} — skipping`,
+    );
+    return;
+  }
+
   switch (opts.sku) {
     case "upsell_v2_ethnicity":
       return runEthnicityPipeline(opts);
