@@ -49,14 +49,21 @@ const BANDS: Band[] = [
  *   Chinese  ↔ German     ≈ band 2
  *   Indian   ↔ Spanish    ≈ band 4
  */
+/**
+ * Each chip's `key` matches a value in the `chipLabels` prop so callers
+ * can swap the visible label per locale. `label` is the English default
+ * — used as fallback if no override is passed.
+ */
 const CHIPS = [
-  { side: "right",  topPct:  9, flag: "🇸🇪", label: "Swedish"  },
-  { side: "left", topPct: 12, flag: "🇳🇬", label: "Nigerian" },
-  { side: "right",  topPct: 45, flag: "🇨🇳", label: "Chinese"  },
-  { side: "left", topPct: 47, flag: "🇩🇪", label: "German"   },
-  { side: "right",  topPct: 79, flag: "🇮🇳", label: "Indian"   },
-  { side: "left", topPct: 85, flag: "🇪🇸", label: "Spanish"  },
+  { key: "swedish",  side: "right", topPct:  9, flag: "🇸🇪", label: "Swedish"  },
+  { key: "nigerian", side: "left",  topPct: 12, flag: "🇳🇬", label: "Nigerian" },
+  { key: "chinese",  side: "right", topPct: 45, flag: "🇨🇳", label: "Chinese"  },
+  { key: "german",   side: "left",  topPct: 47, flag: "🇩🇪", label: "German"   },
+  { key: "indian",   side: "right", topPct: 79, flag: "🇮🇳", label: "Indian"   },
+  { key: "spanish",  side: "left",  topPct: 85, flag: "🇪🇸", label: "Spanish"  },
 ] as const;
+
+export type ChipKey = (typeof CHIPS)[number]["key"];
 
 /**
  * Build the polygon for one band. Each band is a parallelogram bounded by two
@@ -121,6 +128,11 @@ interface SlicedPortraitProps {
   showChips?: boolean;
   showScan?: boolean;
   scanLabel?: string;
+  /**
+   * Per-chip label overrides keyed by the CHIPS[i].key value.
+   * Missing keys fall back to the default English label.
+   */
+  chipLabels?: Partial<Record<ChipKey, string>>;
 }
 
 export function SlicedPortrait({
@@ -131,6 +143,7 @@ export function SlicedPortrait({
   showChips = true,
   showScan = true,
   scanLabel = "AI Heritage Scan",
+  chipLabels,
 }: SlicedPortraitProps) {
   return (
     <div className={cn("relative flex h-full w-full items-center justify-center", className)}>
@@ -193,7 +206,7 @@ export function SlicedPortrait({
         {showChips &&
           CHIPS.map((c) => (
             <div
-              key={c.label}
+              key={c.key}
               className={cn(
                 "absolute z-10 flex items-center gap-1.5 rounded-[var(--radius-pill)] bg-white px-3 py-1.5 text-sm font-bold text-[var(--color-ink)] shadow-[var(--shadow-card)]",
                 c.side === "left" ? "left-0 -translate-x-2" : "right-0 translate-x-2",
@@ -201,7 +214,7 @@ export function SlicedPortrait({
               style={{ top: `${c.topPct}%` }}
             >
               <span className="text-base leading-none">{c.flag}</span>
-              <span className="leading-none">{c.label}</span>
+              <span className="leading-none">{chipLabels?.[c.key] ?? c.label}</span>
             </div>
           ))}
 
@@ -212,7 +225,7 @@ export function SlicedPortrait({
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-[var(--color-orange)] to-[var(--color-coral)] text-xs text-white">
                 ✦
               </span>
-              <span className="text-sm font-bold text-[var(--color-ink)]">{scanLabel}</span>
+              <span className="text-sm font-bold text-[var(--color-ink)]">AI Heritage Scan</span>
             </div>
           </div>
         )}

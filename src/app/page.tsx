@@ -8,12 +8,16 @@ import { WorldMapBackground } from "@/components/world-map-background";
 import { ColoredWorldMap } from "@/components/report/colored-world-map";
 import { HeritageMirror } from "@/components/landing/heritage-mirror";
 import { REGIONS } from "@/lib/report-data";
+import { getDictionary, getLocale, localized } from "@/lib/i18n/server";
 
 const SAMPLE_MAP_PAINT = REGIONS.flatMap((r) =>
   r.countries.map((c) => ({ iso2: c.iso2, color: r.color })),
 );
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const dict = await getDictionary();
+  const locale = await getLocale();
+  const l = (href: string) => localized(href, locale);
   return (
     <main className="bg-[var(--color-bg-base)]">
       {/* ───────────────── HERO — tight stack, minimal top/bottom padding ─────────────────
@@ -25,11 +29,11 @@ export default function LandingPage() {
         <header className="relative z-10 mx-auto flex w-full max-w-md items-center justify-between px-5 pt-3 pb-1">
           <Logo className="h-10" />
           <div className="flex items-center gap-2">
-            <Link href="/refunds">
-              <Button variant="ghost" size="sm">Ask for refund</Button>
+            <Link href={l("/refunds")}>
+              <Button variant="ghost" size="sm">{dict.nav.askForRefund}</Button>
             </Link>
-            <Link href="/sign-up">
-              <Button variant="ghost" size="sm">Sign in</Button>
+            <Link href={l("/sign-up")}>
+              <Button variant="ghost" size="sm">{dict.nav.signIn}</Button>
             </Link>
           </div>
         </header>
@@ -37,22 +41,26 @@ export default function LandingPage() {
         <div className="relative z-10 mx-auto w-full max-w-md px-5 pb-5">
           {/* Sliced portrait — natural size, tight padding */}
           <div className="flex justify-center py-2">
-            <SlicedPortrait className="w-full" />
+            <SlicedPortrait
+              className="w-full"
+              scanLabel={dict.landing.heroBadge}
+              chipLabels={dict.flagLabels}
+            />
           </div>
 
           {/* Headline + subhead + CTA — sits right under the portrait */}
           <div className="pt-5">
             <h1 className="mb-2 text-center text-balance leading-[1.05]">
-              Where in the world does <span className="text-[var(--color-orange)]">your face</span> come from?
+              {dict.landing.heroHeadline}
             </h1>
             <p className="mb-4 text-center text-sm leading-snug text-[var(--color-ink-soft)]">
-              Snap a selfie. Discover the regions, migrations, and heritage written into your features.
+              {dict.landing.heroSubhead}
             </p>
-            <Link href="/quiz/1">
-              <Button size="block">Find out where I&apos;m from →</Button>
+            <Link href={l("/quiz/1")}>
+              <Button size="block">{dict.landing.heroCta}</Button>
             </Link>
             <p className="mt-2.5 text-center text-[11px] text-[var(--color-ink-muted)]">
-              ★ 4.8 from 12,000+ users · ~90 seconds
+              {dict.landing.heroRating}
             </p>
           </div>
         </div>
@@ -64,9 +72,9 @@ export default function LandingPage() {
       <section className="bg-[var(--color-bg-soft)] px-5 py-8">
         <div className="mx-auto grid max-w-md grid-cols-3 gap-3 text-center">
           {[
-            ["124K+", "reports"],
-            ["94", "regions"],
-            ["6 sec", "avg scan"],
+            ["124K+", dict.landing.statsReports],
+            ["94", dict.landing.statsRegions],
+            ["6 sec", dict.landing.statsAvgScan],
           ].map(([stat, label]) => (
             <div key={label}>
               <div className="font-display text-2xl font-bold text-[var(--color-orange)] tabular">{stat}</div>
@@ -79,14 +87,14 @@ export default function LandingPage() {
       {/* How it works */}
       <section className="mx-auto max-w-md px-5 py-12">
         <p className="mb-2 text-center text-xs font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          How it works
+          {dict.landing.howItWorksEyebrow}
         </p>
-        <h2 className="mb-8 text-center">Three steps to your story</h2>
+        <h2 className="mb-8 text-center">{dict.landing.howItWorksHeading}</h2>
         <ol className="space-y-4">
           {[
-            ["1", "Tell us about you", "Three quick questions to personalize your reading."],
-            ["2", "Snap a selfie", "Front-facing, well-lit. Photo deletes after 30 days."],
-            ["3", "Read your story", "Heritage breakdown, migration map, cultural ties — and more."],
+            ["1", dict.landing.step1Title, dict.landing.step1Body],
+            ["2", dict.landing.step2Title, dict.landing.step2Body],
+            ["3", dict.landing.step3Title, dict.landing.step3Body],
           ].map(([n, title, desc]) => (
             <li key={n}>
               <Card className="flex items-start gap-4">
@@ -106,11 +114,11 @@ export default function LandingPage() {
       {/* Sample report visual */}
       <section className="mx-auto max-w-md px-5 py-8">
         <p className="mb-2 text-center text-xs font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          Sample report
+          {dict.landing.sampleEyebrow}
         </p>
-        <h2 className="mb-2 text-center">What you&apos;ll discover</h2>
+        <h2 className="mb-2 text-center">{dict.landing.sampleHeading}</h2>
         <p className="mx-auto mb-6 max-w-sm text-center text-sm text-[var(--color-ink-soft)]">
-          Heritage breakdown, an interactive world map, six facial-trait clues, cultural ties, and a painted portrait of your ancestor.
+          {dict.landing.sampleBody}
         </p>
         <Card>
           <ColoredWorldMap
@@ -143,15 +151,15 @@ export default function LandingPage() {
               />
             </div>
             <div>
-              <p className="font-bold text-[var(--color-ink)]">Your ancestor portrait</p>
+              <p className="font-bold text-[var(--color-ink)]">{dict.landing.ancestorPortraitTitle}</p>
               <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
-                A painted face composed from your strongest matches — eight generations back.
+                {dict.landing.ancestorPortraitBody}
               </p>
             </div>
           </div>
 
-          <Link href="/report/demo">
-            <Button size="block" variant="secondary">View full sample report →</Button>
+          <Link href={l("/report/demo")}>
+            <Button size="block" variant="secondary">{dict.landing.viewSampleReport}</Button>
           </Link>
         </Card>
       </section>
@@ -160,18 +168,35 @@ export default function LandingPage() {
       <HeritageMirror />
 
       {/* Testimonials — Trustpilot-style trust card + per-user cards */}
-      <TestimonialsSection />
+      <TestimonialsSection
+        heading={dict.landing.testimonialsHeading}
+        bigNumber={dict.landing.trustBigNumber}
+        bigNumberSub={dict.landing.trustBigNumberSub}
+        rating={dict.landing.trustRating}
+        ratingSub={dict.landing.trustRatingSub}
+        outOf5Label={dict.landing.trustOutOf5}
+        verifiedOnLabel={dict.landing.trustVerifiedOn}
+        starsAlt={dict.landing.trust5Stars}
+        groupImageAlt={dict.landing.testimonialsImageAlt}
+        quoteOverrides={{
+          "Maya R.": dict.testimonialQuotes.mayaR,
+          "Daniel K.": dict.testimonialQuotes.danielK,
+          "Priya S.": dict.testimonialQuotes.priyaS,
+          "Carlos M.": dict.testimonialQuotes.carlosM,
+          "Aiko T.": dict.testimonialQuotes.aikoT,
+        }}
+      />
 
       {/* CTA */}
       <section className="mx-auto max-w-md px-5 pb-16 pt-8">
         <Card className="bg-[var(--color-orange-pale)] text-center">
-          <h3 className="mb-2 font-display text-2xl">Ready to meet your ancestors?</h3>
+          <h3 className="mb-2 font-display text-2xl">{dict.landing.ctaReady}</h3>
           <p className="mb-6 text-sm text-[var(--color-ink-soft)]">
-            Free quiz · No account needed to begin
+            {dict.landing.ctaSub}
           </p>
-          <Link href="/quiz/1">
+          <Link href={l("/quiz/1")}>
             <Button size="block" className="max-w-xs mx-auto">
-              Begin my analysis →
+              {dict.landing.ctaButton}
             </Button>
           </Link>
         </Card>
@@ -182,11 +207,11 @@ export default function LandingPage() {
         <p>© {new Date().getFullYear()} Facelineage</p>
         <hr className="mt-3" />
         <div className="mt-4 flex flex-wrap justify-center gap-x-5 gap-y-2 text-base font-medium">
-          <Link href="/privacy" className="hover:text-[var(--color-orange)]">Privacy</Link>
-          <Link href="/terms" className="hover:text-[var(--color-orange)]">Terms</Link>
-          <Link href="/cookies" className="hover:text-[var(--color-orange)]">Cookies</Link>
-          <Link href="/refunds" className="hover:text-[var(--color-orange)]">Refunds</Link>
-          <Link href="/contact" className="hover:text-[var(--color-orange)]">Contact</Link>
+          <Link href={l("/privacy")} className="hover:text-[var(--color-orange)]">{dict.footer.privacy}</Link>
+          <Link href={l("/terms")} className="hover:text-[var(--color-orange)]">{dict.footer.terms}</Link>
+          <Link href={l("/cookies")} className="hover:text-[var(--color-orange)]">{dict.footer.cookies}</Link>
+          <Link href={l("/refunds")} className="hover:text-[var(--color-orange)]">{dict.footer.refunds}</Link>
+          <Link href={l("/contact")} className="hover:text-[var(--color-orange)]">{dict.footer.contact}</Link>
         </div>
       </footer>
     </main>

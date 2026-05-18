@@ -1,105 +1,102 @@
 import { notFound } from "next/navigation";
 import { FunnelShell } from "@/components/funnel-shell";
 import { QuizOptions } from "./quiz-options";
+import { getDictionary, localized } from "@/lib/i18n/server";
+import { getLocale } from "@/lib/i18n/server";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 
 /**
- * 5-step pre-quiz before photo capture. Each option's `iconSrc` points to a
- * small animated illustration in /public/quiz — see docs/visual-assets-plan.md
- * for the exact descriptions. The `emoji` is a fallback that renders if the
- * icon file is missing.
+ * 6-step pre-quiz before photo capture. Localized via `src/lib/i18n`.
+ * The step definitions here are language-agnostic — they specify which
+ * keys in the dictionary to render. To translate, edit the dictionaries.
+ */
+/**
+ * Each option references a string key under the step's section of the
+ * dictionary (e.g. step 1 uses `quiz.q1.female`). We don't try to type-link
+ * which optionKeys belong to which dictKey — keep it as a plain string and
+ * resolve at render time.
  */
 type Option = {
-  label: string;
+  optionKey: string;
   emoji: string;
-  /** Optional animated illustration. If omitted, the emoji renders as the primary icon. */
   iconSrc?: string;
 };
 
 type Step = {
   id: number;
-  /** Stable key used in the saved answers JSON. */
+  /** Stable key persisted into the saved answers JSON. */
   key: string;
-  q: string;
+  /** Dictionary subkey under `quiz`, e.g. "q1". */
+  dictKey: keyof Dictionary["quiz"];
   options: Option[];
 };
 
 const QUIZ_STEPS: Step[] = [
-  // ── 1 — sex (emoji-only, no illustrations) ──────────────────────────────
   {
     id: 1,
     key: "gender",
-    q: "What gender do you identify as?",
+    dictKey: "q1",
     options: [
-      { label: "Female", emoji: "♀", iconSrc: "/quiz/q1-female.svg" },
-      { label: "Male",   emoji: "♂", iconSrc: "/quiz/q1-male.svg" },
-      { label: "Other",  emoji: "⚧", iconSrc: "/quiz/q1-other.svg" },
+      { optionKey: "female", emoji: "♀", iconSrc: "/quiz/q1-female.svg" },
+      { optionKey: "male", emoji: "♂", iconSrc: "/quiz/q1-male.svg" },
+      { optionKey: "other", emoji: "⚧", iconSrc: "/quiz/q1-other.svg" },
     ],
   },
-
-  // ── 2 — curiosity / why are you here ────────────────────────────────────
   {
     id: 2,
     key: "motivation",
-    q: "What pulled you here today?",
+    dictKey: "q2",
     options: [
-      { label: "I want to know where I'm really from",     emoji: "🌍", iconSrc: "/quiz/q2-globe.png" },
-      { label: "I'm curious about my features",            emoji: "👁", iconSrc: "/quiz/q2-eye.png" },
-      { label: "There's a family-history mystery",         emoji: "🖼", iconSrc: "/quiz/q2-photo.png" },
-      { label: "Just for fun",                             emoji: "✨", iconSrc: "/quiz/q2-sparkle.png" },
+      { optionKey: "whereFrom", emoji: "🌍", iconSrc: "/quiz/q2-globe.png" },
+      { optionKey: "features", emoji: "👁", iconSrc: "/quiz/q2-eye.png" },
+      { optionKey: "mystery", emoji: "🖼", iconSrc: "/quiz/q2-photo.png" },
+      { optionKey: "fun", emoji: "✨", iconSrc: "/quiz/q2-sparkle.png" },
     ],
   },
-
-  // ── 3 — engaging: identity hook ─────────────────────────────────────────
   {
     id: 3,
     key: "ambiguity",
-    q: "Has anyone ever asked you, “Where are you from?”",
+    dictKey: "q3",
     options: [
-      { label: "All the time",        emoji: "💬", iconSrc: "/quiz/q3-many-bubbles.png" },
-      { label: "Now and then",        emoji: "💭", iconSrc: "/quiz/q3-one-bubble.png" },
-      { label: "Hardly ever",         emoji: "🤏", iconSrc: "/quiz/q3-tiny-bubble.png" },
-      { label: "I love when they do", emoji: "🥰", iconSrc: "/quiz/q3-bubble-heart.png" },
+      { optionKey: "allTheTime", emoji: "💬", iconSrc: "/quiz/q3-many-bubbles.png" },
+      { optionKey: "nowAndThen", emoji: "💭", iconSrc: "/quiz/q3-one-bubble.png" },
+      { optionKey: "hardlyEver", emoji: "🤏", iconSrc: "/quiz/q3-tiny-bubble.png" },
+      { optionKey: "loveIt", emoji: "🥰", iconSrc: "/quiz/q3-bubble-heart.png" },
     ],
   },
-
-  // ── 4 — engaging: anticipation hook ─────────────────────────────────────
   {
     id: 4,
     key: "surprise",
-    q: "What would surprise you most to discover?",
+    dictKey: "q4",
     options: [
-      { label: "Heritage from a place I'd never expect",   emoji: "📍", iconSrc: "/quiz/q4-pin.png" },
-      { label: "Noble or royal bloodline",                 emoji: "👑", iconSrc: "/quiz/q4-crown.png" },
-      { label: "A trait shared with an ancient people",    emoji: "🏛", iconSrc: "/quiz/q4-temple.png" },
-      { label: "More mixed than I imagined",               emoji: "🎨", iconSrc: "/quiz/q4-swirl.png" },
+      { optionKey: "unexpected", emoji: "📍", iconSrc: "/quiz/q4-pin.png" },
+      { optionKey: "royal", emoji: "👑", iconSrc: "/quiz/q4-crown.png" },
+      { optionKey: "ancient", emoji: "🏛", iconSrc: "/quiz/q4-temple.png" },
+      { optionKey: "mixed", emoji: "🎨", iconSrc: "/quiz/q4-swirl.png" },
     ],
   },
-
-  // ── 5 — age ─────────────────────────────────────────────────────────────
   {
     id: 5,
     key: "age",
-    q: "What is your age?",
+    dictKey: "q5",
     options: [
-      { label: "<18", emoji: "seed", iconSrc: "/quiz/q5-seed.png" },
-      { label: "18–24", emoji: "🌱", iconSrc: "/quiz/q5-sprout.png" },
-      { label: "25–34", emoji: "🌿", iconSrc: "/quiz/q5-sapling.png" },
-      { label: "35–44", emoji: "🌳", iconSrc: "/quiz/q5-tree.png" },
-      { label: "45–54", emoji: "🍂", iconSrc: "/quiz/q5-autumn-tree.png" },
-      { label: "55+",   emoji: "🪶", iconSrc: "/quiz/q5-ancient-tree.png" },
+      { optionKey: "under18", emoji: "seed", iconSrc: "/quiz/q5-seed.png" },
+      { optionKey: "a18_24", emoji: "🌱", iconSrc: "/quiz/q5-sprout.png" },
+      { optionKey: "a25_34", emoji: "🌿", iconSrc: "/quiz/q5-sapling.png" },
+      { optionKey: "a35_44", emoji: "🌳", iconSrc: "/quiz/q5-tree.png" },
+      { optionKey: "a45_54", emoji: "🍂", iconSrc: "/quiz/q5-autumn-tree.png" },
+      { optionKey: "a55plus", emoji: "🪶", iconSrc: "/quiz/q5-ancient-tree.png" },
     ],
   },
-
-  // ── 6 — heritage roots (drives the prompt-side weighting) ───────────────
   {
     id: 6,
     key: "heritage_roots",
-    q: "What do you know about your family's roots?",
+    dictKey: "q6",
     options: [
-      { label: "Same country as me, going back generations", emoji: "🏡", iconSrc: "/quiz/q6-roots.png" },
-      { label: "One or both parents came from somewhere else", emoji: "✈️", iconSrc: "/quiz/q6-suitcase.png" },
-      { label: "My family is a mix of several places", emoji: "🎨", iconSrc: "/quiz/q4-swirl.png" },
-      { label: "Honestly, no idea", emoji: "❔", iconSrc: "/quiz/q6-question.png" },
+      { optionKey: "sameCountry", emoji: "🏡", iconSrc: "/quiz/q6-roots.png" },
+      { optionKey: "parentsMoved", emoji: "✈️", iconSrc: "/quiz/q6-suitcase.png" },
+      { optionKey: "mix", emoji: "🎨", iconSrc: "/quiz/q4-swirl.png" },
+      { optionKey: "noIdea", emoji: "❔", iconSrc: "/quiz/q6-question.png" },
     ],
   },
 ];
@@ -110,12 +107,14 @@ export default async function QuizStepPage({ params }: { params: Promise<{ step:
   const data = QUIZ_STEPS.find((q) => q.id === stepNum);
   if (!data) notFound();
 
+  const locale = await getLocale();
+  const dict = await getDictionary();
+  const stepDict = dict.quiz[data.dictKey];
+
   const next = stepNum >= QUIZ_STEPS.length ? "/capture" : `/quiz/${stepNum + 1}`;
   const back = stepNum > 1 ? `/quiz/${stepNum - 1}` : "/";
 
-  // Build the list of images the next page will need so we can warm them
-  // in the browser cache before the user taps. If next is /capture, the
-  // hero selfie illustration is the heaviest above-the-fold asset.
+  // Warm next-page images.
   let prefetchImages: string[];
   if (stepNum >= QUIZ_STEPS.length) {
     prefetchImages = ["/selfie.png"];
@@ -126,14 +125,26 @@ export default async function QuizStepPage({ params }: { params: Promise<{ step:
       .filter((s): s is string => !!s);
   }
 
+  // Resolve localized labels for the options.
+  const resolvedOptions = data.options.map((o) => ({
+    label: (stepDict as Record<string, string>)[o.optionKey] ?? o.optionKey,
+    emoji: o.emoji,
+    iconSrc: o.iconSrc,
+  }));
+
   return (
-    <FunnelShell step={stepNum} totalSteps={QUIZ_STEPS.length} showBack backHref={back}>
+    <FunnelShell
+      step={stepNum}
+      totalSteps={QUIZ_STEPS.length}
+      showBack
+      backHref={localized(back, locale)}
+    >
       <div className="pt-8">
-        <h2 className="mb-8 text-balance">{data.q}</h2>
+        <h2 className="mb-8 text-balance">{(stepDict as { q: string }).q}</h2>
         <QuizOptions
           questionKey={data.key}
-          options={data.options}
-          nextHref={next}
+          options={resolvedOptions}
+          nextHref={localized(next, locale)}
           prefetchImages={prefetchImages}
         />
       </div>

@@ -13,9 +13,11 @@ import {
 } from "@/components/icons";
 import { SelfieCamera, isCameraSupported } from "@/components/selfie-camera";
 import { uploadPhoto } from "@/lib/actions/upload-photo";
+import { useI18n } from "@/lib/i18n/client";
 
 export function CaptureView() {
   const router = useRouter();
+  const { t } = useI18n();
   const [preview, setPreview] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -120,10 +122,10 @@ export function CaptureView() {
 
         <div className="space-y-2">
           <Button size="block" onClick={submit} disabled={uploading}>
-            {uploading ? "Uploading…" : "Looks good — analyze it"}
+            {uploading ? t.capture.uploading : t.capture.confirmButton}
           </Button>
           <Button size="block" variant="ghost" onClick={reset} disabled={uploading}>
-            Try again
+            {t.capture.retakeButton}
           </Button>
         </div>
       </>
@@ -148,10 +150,9 @@ export function CaptureView() {
 
       {/* Heading + subhead */}
       <div className="text-center">
-        <h2 className="mb-2 text-balance">Now show us your face</h2>
+        <h2 className="mb-2 text-balance">{t.capture.headline}</h2>
         <p className="mx-auto max-w-sm text-sm leading-snug text-[var(--color-ink-soft)]">
-          A clear, front-facing photo gives the most accurate analysis. We delete it
-          after 30 days and never share it.
+          {t.capture.body}
         </p>
       </div>
 
@@ -176,7 +177,7 @@ export function CaptureView() {
 
           <Button size="block" onClick={openCamera}>
             <CameraIcon className="h-6 w-6" />
-            Take a selfie
+            {t.capture.takeButton}
           </Button>
           <Button
             size="block"
@@ -184,7 +185,7 @@ export function CaptureView() {
             onClick={() => inputRef.current?.click()}
           >
             <PhotosIcon className="h-6 w-6 text-[var(--color-ink)]" />
-            Upload from photos
+            {t.capture.uploadButton}
           </Button>
         </div>
       </Card>
@@ -193,15 +194,15 @@ export function CaptureView() {
       <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[10px] text-[var(--color-ink-muted)]">
         <div className="rounded-[var(--radius-chip)] bg-white p-2">
           <ShieldLockIcon className="mx-auto h-7 w-7" />
-          <div className="mt-0.5 font-semibold text-[var(--color-ink-soft)]">Encrypted</div>
+          <div className="mt-0.5 font-semibold text-[var(--color-ink-soft)]">{t.capture.trustEncrypted}</div>
         </div>
         <div className="rounded-[var(--radius-chip)] bg-white p-2">
           <TrashIcon className="mx-auto h-7 w-7" />
-          <div className="mt-0.5 font-semibold text-[var(--color-ink-soft)]">30-day auto-delete</div>
+          <div className="mt-0.5 font-semibold text-[var(--color-ink-soft)]">{t.capture.trustDeleted}</div>
         </div>
         <div className="rounded-[var(--radius-chip)] bg-white p-2">
           <ShieldCheckIcon className="mx-auto h-7 w-7" />
-          <div className="mt-0.5 font-semibold text-[var(--color-ink-soft)]">Never shared</div>
+          <div className="mt-0.5 font-semibold text-[var(--color-ink-soft)]">{t.capture.trustNoFace}</div>
         </div>
       </div>
 

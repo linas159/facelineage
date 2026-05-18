@@ -1,65 +1,51 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useI18n, LLink } from "@/lib/i18n/client";
 
-interface Portrait {
+interface PortraitDef {
   src: string;
-  region: string;
-  label: string;
+  /** Key into `t.regions` for the region label. */
+  regionKey: "eastAsia" | "westAfrica" | "northernEurope" | "southAsia" | "southAmerica";
+  /** Key into `t.regions` for the people/group label. */
+  labelKey: "hanChinese" | "yoruba" | "sami" | "bengali" | "quechua";
   color: string;
 }
 
-const PORTRAITS: Portrait[] = [
-  {
-    src: "/landing/twin-east-asia.png",
-    region: "East Asia",
-    label: "Han Chinese",
-    color: "#10b981",
-  },
-  {
-    src: "/landing/twin-west-africa.png",
-    region: "West Africa",
-    label: "Yoruba",
-    color: "#7c5cff",
-  },
-  {
-    src: "/landing/twin-northern-europe.png",
-    region: "Northern Europe",
-    label: "Sami",
-    color: "#ec4899",
-  },
-  {
-    src: "/landing/twin-south-asia.png",
-    region: "South Asia",
-    label: "Bengali",
-    color: "#fbbf24",
-  },
-  {
-    src: "/landing/twin-andes.png",
-    region: "South America",
-    label: "Quechua",
-    color: "#f97373",
-  },
+const PORTRAIT_DEFS: PortraitDef[] = [
+  { src: "/landing/twin-east-asia.png",        regionKey: "eastAsia",       labelKey: "hanChinese", color: "#10b981" },
+  { src: "/landing/twin-west-africa.png",      regionKey: "westAfrica",     labelKey: "yoruba",     color: "#7c5cff" },
+  { src: "/landing/twin-northern-europe.png",  regionKey: "northernEurope", labelKey: "sami",       color: "#ec4899" },
+  { src: "/landing/twin-south-asia.png",       regionKey: "southAsia",      labelKey: "bengali",    color: "#fbbf24" },
+  { src: "/landing/twin-andes.png",            regionKey: "southAmerica",   labelKey: "quechua",    color: "#f97373" },
 ];
 
 const CYCLE_MS = 2800;
 
 export function HeritageMirror() {
+  const { t } = useI18n();
   const [idx, setIdx] = useState(0);
   const [paused, setPaused] = useState(false);
 
+  // Resolve localized labels at render time.
+  const portraits = PORTRAIT_DEFS.map((p) => ({
+    src: p.src,
+    region: t.regions[p.regionKey],
+    label: t.regions[p.labelKey],
+    color: p.color,
+  }));
+
   useEffect(() => {
     if (paused) return;
-    const t = setInterval(() => {
-      setIdx((i) => (i + 1) % PORTRAITS.length);
+    const i = setInterval(() => {
+      setIdx((cur) => (cur + 1) % portraits.length);
     }, CYCLE_MS);
-    return () => clearInterval(t);
-  }, [paused]);
+    return () => clearInterval(i);
+  }, [paused, portraits.length]);
 
-  const current = PORTRAITS[idx];
+  const current = portraits[idx];
 
   return (
     <section className="mx-auto max-w-md px-5 py-14">
@@ -67,15 +53,15 @@ export function HeritageMirror() {
       <div className="mb-3 text-center">
         <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-[var(--color-ink)] shadow-[var(--shadow-chip)]">
           <span className="h-2 w-2 rounded-full bg-gradient-to-br from-[var(--color-orange)] to-[var(--color-violet)]" />
-          Heritage Mirror
+          {t.landing.mirrorBadge}
         </span>
       </div>
 
       <h2 className="mb-2 text-center text-balance">
-        Watch your face <span className="text-[var(--color-orange)]">travel the world</span>
+        {t.landing.mirrorHeadlineA} <span className="text-[var(--color-orange)]">{t.landing.mirrorHeadlineB}</span>
       </h2>
       <p className="mx-auto mb-6 max-w-sm text-center text-sm text-[var(--color-ink-soft)]">
-        Same bones, every culture. Five reflections, drawn from the heritage written into your features.
+        {t.landing.mirrorBody}
       </p>
 
       {/* Morphing portrait card */}
@@ -85,7 +71,7 @@ export function HeritageMirror() {
         onMouseLeave={() => setPaused(false)}
       >
         {/* Crossfading layers */}
-        {PORTRAITS.map((p, i) => (
+        {portraits.map((p, i) => (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={p.src}
@@ -119,7 +105,7 @@ export function HeritageMirror() {
 
           {/* Cycle dots */}
           <div className="flex gap-1.5 rounded-full bg-black/30 px-2 py-1.5 backdrop-blur-md">
-            {PORTRAITS.map((_, i) => (
+            {portraits.map((_, i) => (
               <span
                 key={i}
                 className={cn(
@@ -134,7 +120,7 @@ export function HeritageMirror() {
 
       {/* Tappable thumbnail row — jump to a specific reflection */}
       <div className="mx-auto mt-4 flex max-w-[340px] items-center justify-between gap-2">
-        {PORTRAITS.map((p, i) => {
+        {portraits.map((p, i) => {
           const active = i === idx;
           return (
             <button
@@ -160,13 +146,13 @@ export function HeritageMirror() {
       </div>
 
       <div className="mt-7 text-center">
-        <Link href="/quiz/1">
+        <LLink href="/quiz/1">
           <Button size="block" className="mx-auto max-w-xs">
-            Show me my reflections →
+            {t.landing.mirrorCta}
           </Button>
-        </Link>
+        </LLink>
         <p className="mt-2 text-[11px] text-[var(--color-ink-muted)]">
-          Powered by your selfie · Cancel anytime
+          {t.landing.mirrorTagline}
         </p>
       </div>
     </section>

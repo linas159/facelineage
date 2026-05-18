@@ -15,6 +15,7 @@ import { Card } from "@/components/ui/card";
 import { PLANS, type PlanKey } from "@/lib/stripe";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
 import { PayPalButton } from "@/components/paypal-button";
+import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
 
 type Mode = "intro" | "upsell";
 type UpsellId = "parents" | "ethnicity" | "ages" | "partner" | "book";
@@ -26,12 +27,15 @@ interface CheckoutClientProps {
   analysisId: string;
 }
 
-const UPSELL_LABELS: Record<UpsellId, string> = {
-  parents: "What Each Parent Gave You",
-  ethnicity: "Heritage Mirror",
-  ages: "Through The Ages",
-  partner: "Future Partner",
-  book: "Heritage Book",
+// Map upsell IDs to the dictionary key holding their short label.
+// Reuses the upsell subtitle/title (short, localized) rather than maintaining
+// a separate per-locale label list.
+const UPSELL_TITLE_KEYS: Record<UpsellId, "parentsSubtitle" | "ethnicitySubtitle" | "agesSubtitle" | "partnerSubtitle" | "bookSubtitle"> = {
+  parents: "parentsSubtitle",
+  ethnicity: "ethnicitySubtitle",
+  ages: "agesSubtitle",
+  partner: "partnerSubtitle",
+  book: "bookSubtitle",
 };
 
 // Minimal IANA-timezone → ISO-2 country mapping for the common cases.
@@ -90,9 +94,13 @@ interface CheckoutInit {
   amount: number;
   currency: string;
   returnUrl?: string;
+  /** Set by /api/checkout — required to confirm card payments because we
+   *  hide the email field in the PaymentElement. */
+  customerEmail?: string | null;
 }
 
 export function CheckoutClient(props: CheckoutClientProps) {
+  const { t, locale } = useI18n();
   const [init, setInit] = useState<CheckoutInit | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,7 +116,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
         const data = await preloadCheckoutInit(props.plan, props.analysisId);
         if (cancelled) return;
         if (data) setInit(data);
-        else setError("Could not start checkout");
+        else setError(t.checkout.couldNotStart);
         return;
       }
 
@@ -119,8 +127,8 @@ export function CheckoutClient(props: CheckoutClientProps) {
         body: JSON.stringify({ upsell: props.upsellId, analysisId: props.analysisId }),
       });
       if (!res.ok) {
-        const t = await res.text();
-        if (!cancelled) setError(t || "Could not start checkout");
+        const txt = await res.text();
+        if (!cancelled) setError(txt || t.checkout.couldNotStart);
         return;
       }
       const j = (await res.json()) as CheckoutInit;
@@ -136,32 +144,48 @@ export function CheckoutClient(props: CheckoutClientProps) {
     return loadStripe(init.publishableKey);
   }, [init?.publishableKey]);
 
+  const upsellLabel =
+    props.mode === "upsell" && props.upsellId
+      ? t.upsells[UPSELL_TITLE_KEYS[props.upsellId]]
+      : null;
   const labelTitle =
     props.mode === "intro"
-      ? "Unlock your report"
-      : `Add: ${UPSELL_LABELS[props.upsellId!]}`;
+      ? t.checkout.unlockYourReport
+      : fmt(t.checkout.addUpsell, { label: upsellLabel ?? "" });
 
+  // Localized "3 days" / "1 month" etc. — falls back to PLANS' English
+  // string if for some reason the plan key isn't one we know about.
+  const PERIOD_KEY_BY_PLAN: Record<PlanKey, "period3d" | "period7d" | "period1m"> = {
+    sub_intro_3d: "period3d",
+    sub_intro_7d: "period7d",
+    sub_intro_1m: "period1m",
+  };
   const introPeriod =
-    props.mode === "intro" && props.plan ? PLANS[props.plan].introPeriod : null;
+    props.mode === "intro" && props.plan
+      ? t.paywall[PERIOD_KEY_BY_PLAN[props.plan]] ?? PLANS[props.plan].introPeriod
+      : null;
 
+  // /api/checkout returns a fully-locale-prefixed returnUrl. The upsell
+  // path constructs its own here — apply the same prefix so a /ro user
+  // doesn't land back on the English report.
   const redirectTarget =
     typeof window !== "undefined"
       ? init?.returnUrl ??
         (props.mode === "intro"
-          ? `${window.location.origin}/payment-complete?analysis=${props.analysisId}`
-          : `${window.location.origin}/report/${props.analysisId}?upsell=${props.upsellId}`)
+          ? `${window.location.origin}${localizeHref(`/payment-complete?analysis=${props.analysisId}`, locale)}`
+          : `${window.location.origin}${localizeHref(`/report/${props.analysisId}?upsell=${props.upsellId}`, locale)}`)
       : "";
 
   return (
     <div className="pt-4">
       <p className="mb-1 text-center text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-        Secure checkout
+        {t.checkout.secureCheckout}
       </p>
       <h1 className="mb-2 text-center text-2xl">{labelTitle}</h1>
       <p className="mx-auto mb-6 max-w-sm text-center text-xs text-[var(--color-ink-muted)]">
         {props.mode === "intro" && introPeriod
-          ? `Today's charge covers your ${introPeriod} access.`
-          : "One-time purchase."}
+          ? fmt(t.checkout.introCharge, { period: introPeriod })
+          : t.checkout.oneTimePurchase}
       </p>
 
       {error && (
@@ -174,7 +198,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
         <Card className="mb-5 bg-[var(--color-orange-pale)]">
           <div className="flex items-baseline justify-between">
             <span className="text-xl font-semibold text-[var(--color-ink)]">
-              Charged today
+              {t.checkout.chargedToday}
             </span>
             <span className="font-display text-3xl font-bold text-[var(--color-orange)] tabular">
               {formatMoney(init.amount, init.currency)}
@@ -215,7 +239,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
           </div>
           <div className="relative flex justify-center text-xs">
             <span className="bg-[var(--color-bg-base)] px-3 font-semibold text-[var(--color-ink-muted)]">
-              or pay with card
+              {t.checkout.orPayWithCard}
             </span>
           </div>
         </div>
@@ -235,6 +259,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
             amount={init.amount}
             currency={init.currency}
             redirectTarget={redirectTarget}
+            customerEmail={init.customerEmail ?? null}
           />
         </Elements>
       )}
@@ -242,7 +267,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
       {!init && !error && <CheckoutLoader />}
 
       <p className="mt-6 text-center text-[10px] leading-relaxed text-[var(--color-ink-muted)]">
-        Payments are processed by Stripe. Your card details never touch our servers.
+        {t.checkout.stripeNote}
       </p>
     </div>
   );
@@ -299,11 +324,14 @@ function CardSection({
   amount,
   currency,
   redirectTarget,
+  customerEmail,
 }: {
   amount: number;
   currency: string;
   redirectTarget: string;
+  customerEmail: string | null;
 }) {
+  const { t } = useI18n();
   const stripe = useStripe();
   const elements = useElements();
   const router = useRouter();
@@ -321,16 +349,15 @@ function CardSection({
         return_url: redirectTarget,
         payment_method_data: {
           billing_details: {
-            // Email is already on the Stripe Customer (collected on /email),
-            // so we don't need to pass it again. Name/phone are not collected.
+            // Stripe requires us to pass any field we set to "never" in the
+            // PaymentElement's fields config. Email comes from /api/checkout
+            // (we collected it on /email pre-paywall). Name/phone are not
+            // collected by us — empty strings satisfy Stripe.
+            email: customerEmail ?? undefined,
             name: "",
             phone: "",
-            // Every address sub-field set to "never" on the PaymentElement
-            // must be passed here. Empty strings work for line1/line2/city/
-            // state. Country can't be empty per Stripe — we detect it from
-            // the device's timezone. postalCode is "auto" (Stripe collects
-            // if the issuer requires AVS) so we don't pass it.
             address: {
+              // Country can't be empty per Stripe — derive from timezone.
               country: detectCountry(),
               line1: "",
               line2: "",
@@ -347,6 +374,11 @@ function CardSection({
     }
   }
 
+  // If we have the email from /email, hide the field. If we don't (edge
+  // case — direct hit to /checkout with no prior /email step), let Stripe
+  // collect it as a fallback so we don't crash on confirm.
+  const emailFieldMode = customerEmail ? "never" : "auto";
+
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <Card className="!p-3">
@@ -356,7 +388,7 @@ function CardSection({
             wallets: { applePay: "never", googlePay: "never", link: "never" },
             fields: {
               billingDetails: {
-                email: "never",
+                email: emailFieldMode,
                 name: "never",
                 phone: "never",
                 address: {
@@ -393,7 +425,7 @@ function CardSection({
       )}
 
       <Button size="block" type="submit" disabled={busy || !stripe || !elements}>
-        {busy ? "Processing…" : `Pay ${formatMoney(amount, currency)}`}
+        {busy ? t.checkout.processing : fmt(t.checkout.pay, { price: formatMoney(amount, currency) })}
       </Button>
 
       <button
@@ -401,7 +433,7 @@ function CardSection({
         onClick={() => router.back()}
         className="w-full text-center text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink-soft)]"
       >
-        Cancel
+        {t.checkout.cancel}
       </button>
     </form>
   );
@@ -414,22 +446,22 @@ function formatMoney(cents: number, currency: string): string {
   }).format(cents / 100);
 }
 
-const LOADER_PHASES = [
-  "Preparing secure checkout…",
-  "Talking to Stripe…",
-  "Setting up payment options…",
-  "Almost there…",
-];
-
 function CheckoutLoader() {
+  const { t } = useI18n();
+  const phases = [
+    t.checkout.loaderPhases.p1,
+    t.checkout.loaderPhases.p2,
+    t.checkout.loaderPhases.p3,
+    t.checkout.loaderPhases.p4,
+  ];
   const [phaseIdx, setPhaseIdx] = useState(0);
   useEffect(() => {
     const id = setInterval(
-      () => setPhaseIdx((i) => (i + 1) % LOADER_PHASES.length),
+      () => setPhaseIdx((i) => (i + 1) % phases.length),
       1800,
     );
     return () => clearInterval(id);
-  }, []);
+  }, [phases.length]);
   return (
     <Card className="text-center">
       <div className="relative mx-auto h-16 w-16">
@@ -440,10 +472,10 @@ function CheckoutLoader() {
         </span>
       </div>
       <p className="mt-4 text-sm font-semibold text-[var(--color-ink)]">
-        {LOADER_PHASES[phaseIdx]}
+        {phases[phaseIdx]}
       </p>
       <p className="mt-1 text-[11px] text-[var(--color-ink-muted)]">
-        This usually takes a few seconds.
+        {t.checkout.loaderSub}
       </p>
     </Card>
   );

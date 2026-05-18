@@ -7,38 +7,43 @@ import { TestimonialCarousel } from "@/components/testimonials";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+import { useI18n, localizeHref } from "@/lib/i18n/client";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
+
 const PHASE_MS = 6000; // 5 phases × 6s = 30s minimum analysis runtime
 const TICK_MS = 50;
 
-const PHASES = [
-  { label: "Detecting facial landmarks",       color: "var(--color-orange)" },
-  { label: "Mapping bone structure & skin tone", color: "var(--color-yellow)" },
-  { label: "Cross-referencing 94 populations", color: "var(--color-green)" },
-  { label: "Tracing migration paths",          color: "var(--color-violet)" },
-  { label: "Composing your heritage story",    color: "var(--color-coral)" },
-];
+// Phase color palette — labels are pulled from the dictionary at render time.
+const PHASE_COLORS = [
+  "var(--color-orange)",
+  "var(--color-yellow)",
+  "var(--color-green)",
+  "var(--color-violet)",
+  "var(--color-coral)",
+] as const;
 
-const MID_QUESTIONS: { q: string; options: string[] }[] = [
-  {
-    q: "Where did your grandparents come from?",
-    options: ["The same country as me", "One was foreign-born", "Multiple countries", "I'm not sure"],
-  },
-  {
-    q: "Did you grow up speaking another language at home?",
-    options: ["Yes, fluently", "Yes, a little", "No", "I learned later"],
-  },
-  {
-    q: "What part of your heritage matters most to you?",
-    options: ["Food & traditions", "Family stories", "The migrations themselves", "Religion or beliefs"],
-  },
-  {
-    q: "Have you taken a DNA ancestry test before?",
-    options: ["Yes — 23andMe", "Yes — AncestryDNA", "Yes — another", "No, never"],
-  },
-];
+type Mid = Dictionary["analyzing"]["midQuestions"];
+
+function midQuestions(m: Mid) {
+  return [
+    { q: m.grandparentsQ, options: [m.grandparentsA1, m.grandparentsA2, m.grandparentsA3, m.grandparentsA4] },
+    { q: m.languageQ,    options: [m.languageA1,    m.languageA2,    m.languageA3,    m.languageA4] },
+    { q: m.heritageQ,    options: [m.heritageA1,    m.heritageA2,    m.heritageA3,    m.heritageA4] },
+    { q: m.dnaQ,         options: [m.dnaA1,         m.dnaA2,         m.dnaA3,         m.dnaA4] },
+  ];
+}
 
 export function AnalyzingClient({ analysisId }: { analysisId?: string }) {
   const router = useRouter();
+  const { t, locale } = useI18n();
+  const PHASE_LABELS = [
+    t.analyzing.phases.landmarks,
+    t.analyzing.phases.structure,
+    t.analyzing.phases.populations,
+    t.analyzing.phases.migration,
+    t.analyzing.phases.story,
+  ];
+  const MID = midQuestions(t.analyzing.midQuestions);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [phase, setPhase] = useState(0);          // 0..4
   const [phaseProgress, setPhaseProgress] = useState(0); // 0..1 within current phase
@@ -67,7 +72,7 @@ export function AnalyzingClient({ analysisId }: { analysisId?: string }) {
       setPhaseProgress(p);
       if (p >= 1) {
         clearInterval(interval);
-        if (phase < PHASES.length - 1) {
+        if (phase < PHASE_LABELS.length - 1) {
           // Pause and show a question between phases
           setPaused(true);
           setQuestionIdx(phase);
@@ -75,12 +80,12 @@ export function AnalyzingClient({ analysisId }: { analysisId?: string }) {
           // Final phase done — collect email before paywall so we know
           // who's buying before they hit Stripe (simplifies provisioning
           // and rules out post-pay "couldn't link account" failures).
-          setTimeout(() => router.push("/email"), 700);
+          setTimeout(() => router.push(localizeHref("/email", locale)), 700);
         }
       }
     }, TICK_MS);
     return () => clearInterval(interval);
-  }, [phase, paused, router]);
+  }, [phase, paused, router, PHASE_LABELS.length, locale]);
 
   function answerQuestion() {
     setQuestionIdx(null);
@@ -90,7 +95,7 @@ export function AnalyzingClient({ analysisId }: { analysisId?: string }) {
   }
 
   const overallProgress =
-    ((phase + (paused ? 1 : phaseProgress)) / PHASES.length) * 100;
+    ((phase + (paused ? 1 : phaseProgress)) / PHASE_LABELS.length) * 100;
 
   return (
     <>
@@ -128,27 +133,28 @@ export function AnalyzingClient({ analysisId }: { analysisId?: string }) {
       {/* ── Progress chip + heading ─────────────────────────────────────── */}
       <div className="flex flex-shrink-0 flex-col items-center">
         <div className="rounded-full bg-white px-4 py-1 text-sm font-bold text-[var(--color-orange)] shadow-[var(--shadow-chip)] tabular">
-          {Math.round(overallProgress)}% complete
+          {t.analyzing.percentComplete.replace("{n}", String(Math.round(overallProgress)))}
         </div>
         <h2 className="mt-1.5 text-center font-display text-xl font-bold">
-          Analyzing your ancestry…
+          {t.analyzing.headline}
         </h2>
       </div>
 
       {/* ── Phase list ──────────────────────────────────────────────────── */}
       <Card className="mt-2 flex-shrink-0 !p-3">
         <ul className="space-y-1.5">
-          {PHASES.map((p, i) => {
+          {PHASE_LABELS.map((label, i) => {
+            const color = PHASE_COLORS[i];
             const done = i < phase;
             const active = i === phase;
             return (
-              <li key={p.label} className="flex items-center gap-2.5 text-sm">
+              <li key={label} className="flex items-center gap-2.5 text-sm">
                 <span
                   className={cn(
                     "flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white",
                   )}
                   style={{
-                    background: done || active ? p.color : "var(--color-line-strong)",
+                    background: done || active ? color : "var(--color-line-strong)",
                   }}
                 >
                   {done ? "✓" : active ? <PhaseSpinner paused={paused} /> : i + 1}
@@ -160,7 +166,7 @@ export function AnalyzingClient({ analysisId }: { analysisId?: string }) {
                       : "text-[var(--color-ink-muted)]",
                   )}
                 >
-                  {p.label}
+                  {label}
                 </span>
               </li>
             );
@@ -170,14 +176,24 @@ export function AnalyzingClient({ analysisId }: { analysisId?: string }) {
 
       {/* ── Testimonial carousel pinned at the bottom ───────────────────── */}
       <div className="flex flex-1 flex-col justify-end pb-6 pt-2">
-        <TestimonialCarousel intervalMs={5500} />
+        <TestimonialCarousel
+          intervalMs={5500}
+          quoteOverrides={{
+            "Maya R.": t.testimonialQuotes.mayaR,
+            "Daniel K.": t.testimonialQuotes.danielK,
+            "Priya S.": t.testimonialQuotes.priyaS,
+            "Carlos M.": t.testimonialQuotes.carlosM,
+            "Aiko T.": t.testimonialQuotes.aikoT,
+          }}
+        />
       </div>
 
       {/* ── Mid-quiz question modal (pauses analysis) ───────────────────── */}
       {questionIdx !== null && (
         <QuestionSheet
-          q={MID_QUESTIONS[questionIdx].q}
-          options={MID_QUESTIONS[questionIdx].options}
+          eyebrow={t.analyzing.questionEyebrow}
+          q={MID[questionIdx].q}
+          options={MID[questionIdx].options}
           onAnswer={answerQuestion}
         />
       )}
@@ -205,10 +221,12 @@ function PhaseSpinner({ paused }: { paused: boolean }) {
 
 /** Bottom-sheet question modal — pauses the analyzing timer while shown. */
 function QuestionSheet({
+  eyebrow,
   q,
   options,
   onAnswer,
 }: {
+  eyebrow: string;
   q: string;
   options: string[];
   onAnswer: () => void;
@@ -220,7 +238,7 @@ function QuestionSheet({
         style={{ paddingBottom: "max(env(safe-area-inset-bottom), 20px)" }}
       >
         <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-orange)]">
-          While we work — one quick question
+          {eyebrow}
         </p>
         <h3 className="mb-4 font-display text-lg font-bold leading-snug text-[var(--color-ink)]">
           {q}

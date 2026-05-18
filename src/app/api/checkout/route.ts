@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { stripe, PLANS, priceIdFor, type PlanKey } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
+import { getLocale, localized } from "@/lib/i18n/server";
 
 /**
  * POST /api/checkout
@@ -135,12 +136,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Preserve the user's locale through the Stripe redirect: middleware
+  // strips the `/ro` prefix internally, so without re-adding it the
+  // post-payment pages (payment-complete, generating, popups) render in
+  // the default locale even when the user came from `/ro/...`.
+  const locale = await getLocale();
+  const returnPath = localized(`/payment-complete?analysis=${analysisId}`, locale);
+
   return NextResponse.json({
     walletsClientSecret: walletsPI.client_secret,
     cardClientSecret: cardPI.client_secret,
     publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
     amount: planMeta.introCents,
     currency: "usd",
-    returnUrl: `${baseUrl}/payment-complete?analysis=${analysisId}`,
+    returnUrl: `${baseUrl}${returnPath}`,
+    customerEmail: analysis.email ?? null,
   });
 }

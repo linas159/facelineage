@@ -46,9 +46,9 @@ function Laurel({
 }
 
 /** Trustpilot 5-star graphic. Place the official asset at /testimonial/trustpilot-stars.svg. */
-function TrustpilotStars({ imgSrc, className }: { imgSrc: string; className?: string }) {
+function TrustpilotStars({ imgSrc, alt = "5 stars", className }: { imgSrc: string; alt?: string; className?: string }) {
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={imgSrc} alt="5 stars" className={cn("h-7 w-auto", className)} />;
+  return <img src={imgSrc} alt={alt} className={cn("h-7 w-auto", className)} />;
 }
 
 /** Smaller star row for individual testimonial cards (Facelineage orange). */
@@ -99,6 +99,9 @@ interface TrustSummaryCardProps {
   bigNumberSub?: string;
   rating?: string;
   ratingSub?: string;
+  outOf5Label?: string;
+  verifiedOnLabel?: string;
+  starsAlt?: string;
   trustpilotStarsSrc?: string;
   trustpilotLogoSrc?: string;
   className?: string;
@@ -109,6 +112,9 @@ export function TrustSummaryCard({
   bigNumberSub = "ancestry reads delivered across 90+ countries",
   rating = "4.8",
   ratingSub = "Based on 3,200+ verified reviews",
+  outOf5Label = " out of 5",
+  verifiedOnLabel = "Verified on",
+  starsAlt = "5 stars",
   trustpilotStarsSrc = "/testimonial/trustpilot-stars.svg",
   trustpilotLogoSrc = "/testimonial/trustpilot-logo.png",
   className,
@@ -139,19 +145,19 @@ export function TrustSummaryCard({
         <div>
           <div className="font-bold leading-none">
             <span className="text-lg text-[var(--color-green)]">{rating}</span>
-            <span className="text-base text-[var(--color-ink)]"> out of 5</span>
+            <span className="text-base text-[var(--color-ink)]">{outOf5Label}</span>
           </div>
           <p className="mt-1 text-[11px] leading-tight text-[var(--color-ink-soft)]">
             {ratingSub}
           </p>
         </div>
-        <TrustpilotStars imgSrc={trustpilotStarsSrc} />
+        <TrustpilotStars imgSrc={trustpilotStarsSrc} alt={starsAlt} />
       </div>
 
       {/* Trustpilot attribution */}
       {trustpilotLogoSrc && (
         <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-[var(--color-ink-muted)]">
-          <span>Verified on</span>
+          <span>{verifiedOnLabel}</span>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={trustpilotLogoSrc} alt="Trustpilot" className="h-6 w-auto" />
         </div>
@@ -201,20 +207,29 @@ export function TestimonialCard({
 export function TestimonialCarousel({
   items = TESTIMONIALS,
   intervalMs = 4500,
+  quoteOverrides,
 }: {
   items?: Testimonial[];
   intervalMs?: number;
+  /** Map of testimonial.name → translated quote. */
+  quoteOverrides?: Record<string, string>;
 }) {
   const [idx, setIdx] = useState(0);
 
+  const localizedItems = quoteOverrides
+    ? items.map((t) =>
+        quoteOverrides[t.name] ? { ...t, quote: quoteOverrides[t.name] } : t,
+      )
+    : items;
+
   useEffect(() => {
-    const t = setInterval(() => setIdx((i) => (i + 1) % items.length), intervalMs);
+    const t = setInterval(() => setIdx((i) => (i + 1) % localizedItems.length), intervalMs);
     return () => clearInterval(t);
-  }, [items.length, intervalMs]);
+  }, [localizedItems.length, intervalMs]);
 
   return (
     <div className="relative h-[170px]">
-      {items.map((t, i) => (
+      {localizedItems.map((t, i) => (
         <div
           key={t.name}
           className="absolute inset-0 transition-opacity duration-500"
@@ -255,15 +270,19 @@ export function TestimonialGrid() {
 // ────────────────────────────────────────────────────────────────────────────
 
 interface TestimonialsSectionProps {
-  /** Heading shown above the trust block. Original wording — change freely. */
+  /** Heading shown above the trust block. */
   heading?: string;
   /** Big illustration above the trust card. Defaults to /testimonial/group.png. */
   groupImageSrc?: string | null;
-  /** Number to feature in the trust card. */
+  /** Alt text for the group image. */
+  groupImageAlt?: string;
   bigNumber?: string;
   bigNumberSub?: string;
   rating?: string;
   ratingSub?: string;
+  outOf5Label?: string;
+  verifiedOnLabel?: string;
+  starsAlt?: string;
   /** Override the path to your Trustpilot stars image. */
   trustpilotStarsSrc?: string;
   /** How many testimonial cards to show. */
@@ -273,13 +292,21 @@ interface TestimonialsSectionProps {
 export function TestimonialsSection({
   heading = "Our explorers trust us",
   groupImageSrc = "/testimonial/group.png",
+  groupImageAlt = "People who've discovered their heritage",
   bigNumber = "12,000+",
   bigNumberSub = "ancestry reads delivered across 90+ countries",
   rating = "4.8",
   ratingSub = "Based on 3,200+ verified reviews",
+  outOf5Label,
+  verifiedOnLabel,
+  starsAlt,
   trustpilotStarsSrc,
   count = 3,
-}: TestimonialsSectionProps) {
+  quoteOverrides,
+}: TestimonialsSectionProps & {
+  /** Map of testimonial.name → translated quote. Falls back to t.quote. */
+  quoteOverrides?: Record<string, string>;
+}) {
   return (
     <section className="py-6">
       {/* Heading — constrained to mobile column */}
@@ -293,7 +320,7 @@ export function TestimonialsSection({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={groupImageSrc}
-            alt="People who've discovered their heritage"
+            alt={groupImageAlt}
             className="block h-auto w-full"
           />
         </div>
@@ -306,14 +333,19 @@ export function TestimonialsSection({
           bigNumberSub={bigNumberSub}
           rating={rating}
           ratingSub={ratingSub}
+          outOf5Label={outOf5Label}
+          verifiedOnLabel={verifiedOnLabel}
+          starsAlt={starsAlt}
           trustpilotStarsSrc={trustpilotStarsSrc}
           className="mb-6"
         />
 
         <div className="space-y-4">
-          {TESTIMONIALS.slice(0, count).map((t) => (
-            <TestimonialCard key={t.name} t={t} />
-          ))}
+          {TESTIMONIALS.slice(0, count).map((t) => {
+            const localized = quoteOverrides?.[t.name];
+            const tt = localized ? { ...t, quote: localized } : t;
+            return <TestimonialCard key={t.name} t={tt} />;
+          })}
         </div>
       </div>
     </section>

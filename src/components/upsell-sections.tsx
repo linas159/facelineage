@@ -6,6 +6,8 @@ import { loadStripe } from "@stripe/stripe-js";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 
 export type UpsellId =
   | "parents"
@@ -14,6 +16,32 @@ export type UpsellId =
   | "partner"
   | "book";
 
+/**
+ * Per-upsell static data — the parts that don't change per locale:
+ * id, image, pricing, accent color. Text fields are resolved per render
+ * from the `upsells` section of the dictionary.
+ */
+type UpsellStatic = {
+  id: UpsellId;
+  titleKey: "parentsTitle" | "ethnicityTitle" | "agesTitle" | "partnerTitle" | "bookTitle";
+  subtitleKey: "parentsSubtitle" | "ethnicitySubtitle" | "agesSubtitle" | "partnerSubtitle" | "bookSubtitle";
+  bodyKey: "parentsBody" | "ethnicityBody" | "agesBody" | "partnerBody" | "bookBody";
+  ctaKey: "parentsCta" | "ethnicityCta" | "agesCta" | "partnerCta" | "bookCta";
+  price: string;
+  originalPrice: string;
+  imageSrc: string;
+  accent: string;
+};
+
+const UPSELL_STATICS: UpsellStatic[] = [
+  { id: "parents",   titleKey: "parentsTitle",   subtitleKey: "parentsSubtitle",   bodyKey: "parentsBody",   ctaKey: "parentsCta",   price: "$4.99", originalPrice: "$8.99",  imageSrc: "/upsell/parents.png",   accent: "var(--color-orange)" },
+  { id: "ethnicity", titleKey: "ethnicityTitle", subtitleKey: "ethnicitySubtitle", bodyKey: "ethnicityBody", ctaKey: "ethnicityCta", price: "$6.99", originalPrice: "$12.99", imageSrc: "/upsell/ethnicity.png", accent: "var(--color-violet)" },
+  { id: "ages",      titleKey: "agesTitle",      subtitleKey: "agesSubtitle",      bodyKey: "agesBody",      ctaKey: "agesCta",      price: "$6.99", originalPrice: "$12.99", imageSrc: "/upsell/ages.png",      accent: "var(--color-yellow)" },
+  { id: "partner",   titleKey: "partnerTitle",   subtitleKey: "partnerSubtitle",   bodyKey: "partnerBody",   ctaKey: "partnerCta",   price: "$6.99", originalPrice: "$12.99", imageSrc: "/upsell/partner.png",   accent: "var(--color-coral)" },
+  { id: "book",      titleKey: "bookTitle",      subtitleKey: "bookSubtitle",      bodyKey: "bookBody",      ctaKey: "bookCta",      price: "$9.99", originalPrice: "$17.99", imageSrc: "/upsell/book.png",      accent: "var(--color-green)" },
+];
+
+/** Runtime upsell shape after dictionary keys are resolved. */
 export type Upsell = {
   id: UpsellId;
   title: string;
@@ -26,68 +54,22 @@ export type Upsell = {
   accent: string;
 };
 
-export const UPSELLS: Upsell[] = [
-  {
-    id: "parents",
-    title: "See what came from each parent",
-    subtitle: "Mom + Dad breakdown",
-    body:
-      "Upload a photo of each parent. We'll trace which features and which slices of heritage you inherited from each side, with a side-by-side comparison.",
-    price: "$4.99",
-    originalPrice: "$8.99",
-    imageSrc: "/upsell/parents.png",
-    cta: "Add my parents",
-    accent: "var(--color-orange)",
-  },
-  {
-    id: "ethnicity",
-    title: "See yourself in every culture",
-    subtitle: "Heritage Mirror",
-    body:
-      "Watch your face reborn as a Han poet, a Yoruba weaver, a Sami reindeer herder — and a dozen more reflections from across the world.",
-    price: "$6.99",
-    originalPrice: "$12.99",
-    imageSrc: "/upsell/ethnicity.png",
-    cta: "Show my reflections",
-    accent: "var(--color-violet)",
-  },
-  {
-    id: "ages",
-    title: "See yourself across the ages",
-    subtitle: "8 historical portraits",
-    body:
-      "What if you'd lived in Tang-dynasty China, ancient Rome, or the Viking age? We generate eight portraits of you across history.",
-    price: "$6.99",
-    originalPrice: "$12.99",
-    imageSrc: "/upsell/ages.png",
-    cta: "Generate my portraits",
-    accent: "var(--color-yellow)",
-  },
-  {
-    id: "partner",
-    title: "Meet your future partner",
-    subtitle: "AI face match",
-    body:
-      "Based on the proportions, palette, and heritage of your face, we render a portrait of the kind of person who would balance you most.",
-    price: "$6.99",
-    originalPrice: "$12.99",
-    imageSrc: "/upsell/partner.png",
-    cta: "Reveal my match",
-    accent: "var(--color-coral)",
-  },
-  {
-    id: "book",
-    title: "The Heritage Guidebook",
-    subtitle: "Your ancestry research companion",
-    body:
-      "Methods, tools, and frameworks for taking your heritage discovery further: how to trace ancestors, decode DNA results, conduct oral histories, and read old records. A printable PDF you keep forever.",
-    price: "$9.99",
-    originalPrice: "$17.99",
-    imageSrc: "/upsell/book.png",
-    cta: "Get the guidebook",
-    accent: "var(--color-green)",
-  },
-];
+function resolveUpsell(s: UpsellStatic, dict: Dictionary["upsells"]): Upsell {
+  return {
+    id: s.id,
+    title: dict[s.titleKey],
+    subtitle: dict[s.subtitleKey],
+    body: dict[s.bodyKey],
+    price: s.price,
+    originalPrice: s.originalPrice,
+    imageSrc: s.imageSrc,
+    cta: dict[s.ctaKey],
+    accent: s.accent,
+  };
+}
+
+/** Locale-independent UPSELLS data — kept exported for components that need IDs only. */
+export const UPSELLS_STATIC = UPSELL_STATICS;
 
 interface UpsellCardProps {
   upsell: Upsell;
@@ -98,6 +80,7 @@ interface UpsellCardProps {
 }
 
 function UpsellCard({ upsell, busy, purchased, error, onAccept }: UpsellCardProps) {
+  const { t } = useI18n();
   return (
     <Card className="overflow-hidden !p-0">
       <div className="relative aspect-[16/9] w-full overflow-hidden bg-[var(--color-bg-warm)]">
@@ -122,10 +105,10 @@ function UpsellCard({ upsell, busy, purchased, error, onAccept }: UpsellCardProp
         <div className="mb-3 flex items-baseline justify-between rounded-[var(--radius-input)] bg-[var(--color-bg-warm)] px-4 py-3">
           <span className="flex flex-col gap-0.5">
             <span className="text-sm font-semibold text-[var(--color-ink)]">
-              One-time
+              {t.upsells.oneTime}
             </span>
             <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-coral)]">
-              -45% off today
+              {t.upsells.saleBadge}
             </span>
           </span>
           <span className="flex items-baseline gap-2">
@@ -145,7 +128,7 @@ function UpsellCard({ upsell, busy, purchased, error, onAccept }: UpsellCardProp
           <div
             className="rounded-[var(--radius-input)] bg-[var(--color-green)]/10 p-3 text-center text-sm font-semibold text-[var(--color-green)]"
           >
-            ✓ Purchased — generating now
+            {t.upsells.purchasedGenerating}
           </div>
         ) : (
           <Button
@@ -156,7 +139,7 @@ function UpsellCard({ upsell, busy, purchased, error, onAccept }: UpsellCardProp
             {busy ? (
               <span className="inline-flex items-center justify-center gap-2">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                Processing payment…
+                {t.upsells.processing}
               </span>
             ) : (
               upsell.cta
@@ -184,17 +167,19 @@ interface UpsellSectionsProps {
 }
 
 export function UpsellSections({
-  heading = "Take your story further",
-  subhead = "Optional one-time purchases — keep them forever.",
+  heading,
+  subhead,
   ids,
   analysisId,
   className,
 }: UpsellSectionsProps) {
   const router = useRouter();
+  const { t, locale } = useI18n();
   const [busy, setBusy] = useState<UpsellId | null>(null);
   const [purchased, setPurchased] = useState<Partial<Record<UpsellId, boolean>>>({});
   const [errors, setErrors] = useState<Partial<Record<UpsellId, string>>>({});
-  const list = ids ? UPSELLS.filter((u) => ids.includes(u.id)) : UPSELLS;
+  const allUpsells = UPSELL_STATICS.map((s) => resolveUpsell(s, t.upsells));
+  const list = ids ? allUpsells.filter((u) => ids.includes(u.id)) : allUpsells;
 
   async function handleAccept(id: UpsellId) {
     if (!analysisId) {
@@ -204,15 +189,12 @@ export function UpsellSections({
     }
     setBusy(id);
     setErrors((e) => ({ ...e, [id]: undefined }));
-    const result = await chargeUpsell(id, analysisId);
+    const result = await chargeUpsell(id, analysisId, t);
     if (result === "success") {
       setPurchased((p) => ({ ...p, [id]: true }));
-      // Re-render the server component so the buy card disappears and the
-      // owned-state UI (download / upload prompt / generating) takes its
-      // place — no manual refresh needed.
       router.refresh();
     } else if (result === "checkout") {
-      window.location.href = `/checkout?upsell=${id}&analysis=${analysisId}`;
+      window.location.href = localizeHref(`/checkout?upsell=${id}&analysis=${analysisId}`, locale);
       return;
     } else if (typeof result === "string") {
       setErrors((e) => ({ ...e, [id]: result }));
@@ -222,9 +204,9 @@ export function UpsellSections({
 
   return (
     <section className={cn("mt-10", className)}>
-      <h2 className="mb-2 text-center text-balance">{heading}</h2>
+      <h2 className="mb-2 text-center text-balance">{heading ?? t.upsells.sectionHeading}</h2>
       <p className="mx-auto mb-6 max-w-sm text-center text-sm text-[var(--color-ink-soft)]">
-        {subhead}
+        {subhead ?? t.upsells.sectionSubhead}
       </p>
 
       <div className="space-y-5">
@@ -256,6 +238,7 @@ interface UpsellModalProps {
 }
 
 function UpsellModal({ upsell, busy, onAccept, onDecline }: UpsellModalProps) {
+  const { t } = useI18n();
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--color-bg-overlay)] sm:items-center sm:p-4"
@@ -275,7 +258,7 @@ function UpsellModal({ upsell, busy, onAccept, onDecline }: UpsellModalProps) {
           <button
             type="button"
             onClick={onDecline}
-            aria-label="Close"
+            aria-label={t.upsells.closeAria}
             className="absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 text-lg font-bold text-[var(--color-ink-soft)] shadow-[var(--shadow-chip)] backdrop-blur"
           >
             ×
@@ -299,10 +282,10 @@ function UpsellModal({ upsell, busy, onAccept, onDecline }: UpsellModalProps) {
           <div className="mb-4 flex items-baseline justify-between rounded-[var(--radius-input)] bg-[var(--color-bg-warm)] px-4 py-3">
             <span className="flex flex-col gap-0.5">
               <span className="text-sm font-semibold text-[var(--color-ink)]">
-                One-time
+                {t.upsells.oneTime}
               </span>
               <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-coral)]">
-                -45% off today
+                {t.upsells.saleBadge}
               </span>
             </span>
             <span className="flex items-baseline gap-2">
@@ -322,7 +305,7 @@ function UpsellModal({ upsell, busy, onAccept, onDecline }: UpsellModalProps) {
             {busy ? (
               <span className="inline-flex items-center justify-center gap-2">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                Processing payment…
+                {t.upsells.processing}
               </span>
             ) : (
               upsell.cta
@@ -334,7 +317,7 @@ function UpsellModal({ upsell, busy, onAccept, onDecline }: UpsellModalProps) {
             disabled={busy}
             className="mt-3 w-full text-center text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink-soft)] disabled:opacity-40"
           >
-            No thanks, maybe later
+            {t.upsells.noThanks}
           </button>
         </div>
       </div>
@@ -372,7 +355,9 @@ export function UpsellPopupSequence({
   analysisId,
   triggerOnMount = false,
 }: UpsellPopupSequenceProps) {
-  const list = ids ? UPSELLS.filter((u) => ids.includes(u.id)) : UPSELLS;
+  const { t } = useI18n();
+  const all = UPSELL_STATICS.map((s) => resolveUpsell(s, t.upsells));
+  const list = ids ? all.filter((u) => ids.includes(u.id)) : all;
   const [step, setStep] = useState<number>(-1);
   const [busy, setBusy] = useState<UpsellId | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -421,7 +406,7 @@ export function UpsellPopupSequence({
     }
     const upsellRef = list.find((u) => u.id === id) ?? null;
     setBusy(id);
-    const result = await chargeUpsell(id, analysisId);
+    const result = await chargeUpsell(id, analysisId, t);
     setBusy(null);
 
     if (result === "success") {
@@ -477,6 +462,7 @@ function UpsellConfirmedModal({
   upsell: Upsell;
   onContinue: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-[var(--color-bg-overlay)] sm:items-center sm:p-4"
@@ -500,13 +486,13 @@ function UpsellConfirmedModal({
             {upsell.subtitle}
           </p>
           <h2 className="mb-2 font-display text-2xl font-bold leading-tight text-[var(--color-ink)]">
-            {upsell.title} — added!
+            {fmt(t.upsells.addedHeading, { title: upsell.title })}
           </h2>
           <p className="mb-5 text-sm leading-relaxed text-[var(--color-ink-soft)]">
-            We charged your card on file. You&apos;ll find it on your dashboard.
+            {t.upsells.chargedCardBody}
           </p>
           <Button size="block" onClick={onContinue}>
-            Continue
+            {t.upsells.continue}
           </Button>
         </div>
       </div>
@@ -524,7 +510,11 @@ function UpsellConfirmedModal({
 
 type ChargeResult = "success" | "checkout" | string;
 
-async function chargeUpsell(upsell: UpsellId, analysisId: string): Promise<ChargeResult> {
+async function chargeUpsell(
+  upsell: UpsellId,
+  analysisId: string,
+  t: Dictionary,
+): Promise<ChargeResult> {
   let res: Response;
   try {
     res = await fetch("/api/upsell-charge", {
@@ -533,7 +523,7 @@ async function chargeUpsell(upsell: UpsellId, analysisId: string): Promise<Charg
       body: JSON.stringify({ upsell, analysisId }),
     });
   } catch {
-    return "Network error — please try again";
+    return t.upsells.networkError;
   }
 
   const data = (await res.json().catch(() => ({}))) as {
@@ -547,29 +537,24 @@ async function chargeUpsell(upsell: UpsellId, analysisId: string): Promise<Charg
     message?: string;
   };
 
-  // The server refuses to re-charge if the user already owns the add-on.
-  // We treat that as success client-side so the card flips to "Purchased"
-  // without an error toast.
   if (data.alreadyOwned) return "success";
   if (data.success) return "success";
   if (data.requiresCheckout) return "checkout";
 
   if (data.requiresAction && data.clientSecret && data.publishableKey) {
-    // 3DS / SCA — Stripe shows its own popup. After it succeeds the webhook
-    // fires and the user lands back on the page.
     try {
       const stripe = await loadStripe(data.publishableKey);
-      if (!stripe) return "Could not load Stripe.js";
+      if (!stripe) return t.upsells.paymentFailed;
       const { error, paymentIntent } = await stripe.handleNextAction({
         clientSecret: data.clientSecret,
       });
-      if (error) return error.message ?? "Authentication failed";
+      if (error) return error.message ?? t.upsells.paymentFailed;
       if (paymentIntent?.status === "succeeded") return "success";
-      return `Payment status: ${paymentIntent?.status ?? "unknown"}`;
+      return t.upsells.paymentFailed;
     } catch (err) {
-      return err instanceof Error ? err.message : "Authentication failed";
+      return err instanceof Error ? err.message : t.upsells.paymentFailed;
     }
   }
 
-  return data.error ?? "Payment failed";
+  return data.error ?? t.upsells.paymentFailed;
 }

@@ -3,14 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-
-const PHASES = [
-  "Reading your selfie",
-  "Mapping ancestral regions",
-  "Composing your heritage story",
-  "Painting your ancestor portrait",
-  "Rendering cultural scenes",
-];
+import { useI18n } from "@/lib/i18n/client";
 
 interface Props {
   analysisId: string;
@@ -25,6 +18,14 @@ interface Props {
  */
 export function GeneratingState({ analysisId, initialStatus, initialError }: Props) {
   const router = useRouter();
+  const { t } = useI18n();
+  const PHASES = [
+    t.report.phaseReading,
+    t.report.phaseMapping,
+    t.report.phaseStory,
+    t.report.phasePainting,
+    t.report.phaseRendering,
+  ];
   const [status, setStatus] = useState<string>(initialStatus);
   const [error, setError] = useState<string | undefined>(initialError);
   const [phaseIdx, setPhaseIdx] = useState(0);
@@ -64,9 +65,9 @@ export function GeneratingState({ analysisId, initialStatus, initialError }: Pro
   if (status === "failed") {
     return (
       <Card className="mt-8 text-center">
-        <CardTitle className="mb-2">Something went wrong</CardTitle>
+        <CardTitle className="mb-2">{t.report.failedTitle}</CardTitle>
         <CardDescription>
-          {error ?? "We couldn't finish your report. Please contact support — your purchase is on file."}
+          {error ?? t.report.failedBody}
         </CardDescription>
       </Card>
     );
@@ -77,12 +78,12 @@ export function GeneratingState({ analysisId, initialStatus, initialError }: Pro
       <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-orange-pale)]">
         <span className="block h-8 w-8 animate-spin rounded-full border-4 border-[var(--color-orange)] border-t-transparent" />
       </div>
-      <CardTitle className="mb-2">Composing your report</CardTitle>
+      <CardTitle className="mb-2">{t.report.composing}</CardTitle>
       <CardDescription className="mb-4">
         {PHASES[phaseIdx]}…
       </CardDescription>
       <p className="text-xs text-[var(--color-ink-muted)]">
-        This usually takes a minute. Feel free to keep this tab open.
+        {t.report.usuallyMinute}
       </p>
     </Card>
   );

@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { getLocale, localized } from "@/lib/i18n/server";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp", "image/heic"];
@@ -86,7 +87,8 @@ export async function uploadPhoto(formData: FormData) {
     });
   }
 
-  redirect(`/analyzing?id=${analysis.id}`);
+  const locale = await getLocale();
+  redirect(localized(`/analyzing?id=${analysis.id}`, locale));
 }
 
 /**

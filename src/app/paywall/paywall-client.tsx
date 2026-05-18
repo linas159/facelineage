@@ -8,44 +8,27 @@ import { TestimonialsSection } from "@/components/testimonials";
 import { Illustration } from "@/components/illustration";
 import { cn } from "@/lib/utils";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
+import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
 
 type PlanKey = "sub_intro_3d" | "sub_intro_7d" | "sub_intro_1m";
 
-const PLANS: { key: PlanKey; label: string; intro: string; introPeriod: string; recurring: string; recurringPeriod: string; badge?: string; introCents: string; recurringCents: string; original: string }[] = [
-  {
-    key: "sub_intro_3d",
-    label: "3-Day",
-    intro: "$1.95",
-    introPeriod: "for 3 days",
-    recurring: "$24.99",
-    recurringPeriod: "week",
-    badge: "Most popular",
-    introCents: "$1.95",
-    recurringCents: "$24.99 every week",
-    original: "$9.95",
-  },
-  {
-    key: "sub_intro_7d",
-    label: "7-Day",
-    intro: "$6.99",
-    introPeriod: "for 7 days",
-    recurring: "$24.99",
-    recurringPeriod: "week",
-    introCents: "$6.99",
-    recurringCents: "$24.99 every week",
-    original: "$19.99",
-  },
-  {
-    key: "sub_intro_1m",
-    label: "1-Month",
-    intro: "$17.99",
-    introPeriod: "for 1 month",
-    recurring: "$47.99",
-    recurringPeriod: "month",
-    introCents: "$17.99",
-    recurringCents: "$47.99 every month",
-    original: "$39.99",
-  },
+// Plan numbers + currency are locale-independent. Labels + period words
+// come from the dictionary at render time.
+type PlanStatic = {
+  key: PlanKey;
+  labelKey: "planLabel3d" | "planLabel7d" | "planLabel1m";
+  periodKey: "period3d" | "period7d" | "period1m";
+  recurringPattern: "recurringWeekly" | "recurringMonthly";
+  intro: string;
+  recurring: string;
+  badged: boolean;
+  original: string;
+};
+
+const PLAN_STATICS: PlanStatic[] = [
+  { key: "sub_intro_3d", labelKey: "planLabel3d", periodKey: "period3d", recurringPattern: "recurringWeekly", intro: "$1.95",  recurring: "$24.99", badged: true,  original: "$9.95" },
+  { key: "sub_intro_7d", labelKey: "planLabel7d", periodKey: "period7d", recurringPattern: "recurringWeekly", intro: "$6.99",  recurring: "$24.99", badged: false, original: "$19.99" },
+  { key: "sub_intro_1m", labelKey: "planLabel1m", periodKey: "period1m", recurringPattern: "recurringMonthly", intro: "$17.99", recurring: "$47.99", badged: false, original: "$39.99" },
 ];
 
 const OFFER_WINDOW_MS = 15 * 60 * 1000;
@@ -78,14 +61,17 @@ interface PaywallClientProps {
 
 export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
   const router = useRouter();
+  const { t, locale } = useI18n();
   const [selected, setSelected] = useState<PlanKey>("sub_intro_3d");
   const [busy, setBusy] = useState(false);
   const [chargeError, setChargeError] = useState<string | null>(null);
   const [selfieSrc, setSelfieSrc] = useState<string | null>(null);
   const [remainingMs, setRemainingMs] = useState(OFFER_WINDOW_MS);
 
-  const plan = PLANS.find((p) => p.key === selected)!;
-  const introPeriod = plan.introPeriod.replace("for ", "");
+  const planStatic = PLAN_STATICS.find((p) => p.key === selected)!;
+  const planLabel = t.paywall[planStatic.labelKey];
+  const planPeriod = t.paywall[planStatic.periodKey];
+  const planRecurringText = fmt(t.paywall[planStatic.recurringPattern], { price: planStatic.recurring });
 
   useEffect(() => {
     try {
@@ -183,31 +169,11 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
   const timeStr = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 
   const REPORT_FEATURES: { title: string; desc: string; src: string }[] = [
-    {
-      title: "Heritage breakdown",
-      desc: "Percentage match across 94 ancestral regions.",
-      src: "/quiz/q2-globe.png",
-    },
-    {
-      title: "Migration map",
-      desc: "Animated routes your ancestors likely traveled.",
-      src: "/quiz/q4-pin.png",
-    },
-    {
-      title: "Personalized story",
-      desc: "A written narrative tying your features to history.",
-      src: ICON.story,
-    },
-    {
-      title: "Family resemblance hints",
-      desc: "Which traits typically pass down — and from which side.",
-      src: ICON.family,
-    },
-    {
-      title: "Your ancestor portrait",
-      desc: "A painted portrait built from your strongest matches — what an ancestor eight generations back may have looked like.",
-      src: ICON.ancestor,
-    },
+    { title: t.paywall.feat1Title, desc: t.paywall.feat1Desc, src: "/quiz/q2-globe.png" },
+    { title: t.paywall.feat2Title, desc: t.paywall.feat2Desc, src: "/quiz/q4-pin.png" },
+    { title: t.paywall.feat3Title, desc: t.paywall.feat3Desc, src: ICON.story },
+    { title: t.paywall.feat4Title, desc: t.paywall.feat4Desc, src: ICON.family },
+    { title: t.paywall.feat5Title, desc: t.paywall.feat5Desc, src: ICON.ancestor },
   ];
 
   return (
@@ -219,9 +185,9 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={ICON.timer} alt="" aria-hidden className="h-6 w-6 object-contain" />
             <div className="text-[13px] leading-tight">
-              <div className="font-bold">Special offer reserved for you</div>
+              <div className="font-bold">{t.paywall.offerBannerTitle}</div>
               <div className="text-[11px] opacity-90">
-                {expired ? "Offer about to expire" : "Lock in your discounted price"}
+                {expired ? t.paywall.offerExpiring : t.paywall.offerBannerSub}
               </div>
             </div>
           </div>
@@ -229,7 +195,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
             <span className="font-display text-2xl font-bold tabular leading-none">
               {timeStr}
             </span>
-            <span className="text-[10px] uppercase tracking-wider opacity-90">left</span>
+            <span className="text-[10px] uppercase tracking-wider opacity-90">{t.paywall.offerLeft}</span>
           </div>
         </div>
       </div>
@@ -252,16 +218,16 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
             </div>
           </div>
           <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-[var(--color-green)] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-[var(--shadow-chip)]">
-            Analyzed
+            {t.paywall.analyzedChip}
           </span>
         </div>
-        <Chip color="green" className="mb-3">Your analysis is ready</Chip>
-        <h1 className="text-balance">Unlock your full report</h1>
+        <Chip color="green" className="mb-3">{t.paywall.statusReady}</Chip>
+        <h1 className="text-balance">{t.paywall.mainHeadline}</h1>
         <p className="mx-auto mt-2 mb-5 max-w-sm text-sm text-[var(--color-ink-soft)]">
-          Heritage breakdown · Migration map · Personalized story · Shareable card
+          {t.paywall.mainSubhead}
         </p>
         <Button size="block" onClick={scrollToPricing} className="mx-auto max-w-xs">
-          Unlock my report
+          {t.paywall.unlockCta}
         </Button>
       </div>
 
@@ -270,16 +236,16 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-              Preview
+              {t.paywall.previewLabel}
             </p>
             <p className="font-display text-base font-bold text-[var(--color-ink)]">
-              Your top heritage matches
+              {t.paywall.previewTitle}
             </p>
           </div>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-bg-warm)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-soft)]">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={ICON.locked} alt="" aria-hidden className="h-3.5 w-3.5 object-contain" />
-            Locked
+            {t.paywall.lockedLabel}
           </span>
         </div>
 
@@ -289,10 +255,10 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
           style={{ filter: "blur(6px)" }}
         >
           {[
-            ["Northern European", "72%", "var(--color-orange)"],
-            ["Iberian Peninsula", "14%", "var(--color-green)"],
-            ["Mediterranean", "8%", "var(--color-yellow)"],
-            ["West African", "6%", "var(--color-violet)"],
+            [t.paywall.sampleRegion1, "72%", "var(--color-orange)"],
+            [t.paywall.sampleRegion2, "14%", "var(--color-green)"],
+            [t.paywall.sampleRegion3, "8%", "var(--color-yellow)"],
+            [t.paywall.sampleRegion4, "6%", "var(--color-violet)"],
           ].map(([region, pct, color]) => (
             <div key={region} className="flex items-center gap-3">
               <span className="w-32 text-sm font-semibold text-[var(--color-ink)]">
@@ -314,7 +280,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-white to-transparent" />
         <div className="pointer-events-none absolute inset-0 flex items-end justify-center pb-4">
           <span className="rounded-full bg-[var(--color-ink)] px-3 py-1.5 text-[11px] font-bold text-white shadow-[var(--shadow-card)]">
-            Unlock to reveal real percentages
+            {t.paywall.unlockToReveal}
           </span>
         </div>
       </Card>
@@ -324,7 +290,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         <span className="absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-[var(--color-bg-warm)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-soft)]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={ICON.locked} alt="" aria-hidden className="h-3.5 w-3.5 object-contain" />
-          Locked
+          {t.paywall.lockedLabel}
         </span>
         <div className="relative aspect-[2/1] w-full overflow-hidden bg-[var(--color-bg-warm)]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -339,13 +305,13 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         </div>
         <div className="p-4">
           <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-            Preview
+            {t.paywall.previewLabel}
           </p>
           <p className="font-display text-base font-bold leading-tight text-[var(--color-ink)]">
-            Your ancestor portrait
+            {t.paywall.ancestorTeaserTitle}
           </p>
           <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
-            A painted face, eight generations back.
+            {t.paywall.ancestorTeaserSub}
           </p>
         </div>
       </Card>
@@ -355,7 +321,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         <span className="absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-[var(--color-bg-warm)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-soft)]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={ICON.locked} alt="" aria-hidden className="h-3.5 w-3.5 object-contain" />
-          Locked
+          {t.paywall.lockedLabel}
         </span>
         <div className="relative aspect-[2/1] w-full overflow-hidden bg-[var(--color-bg-warm)]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -370,13 +336,13 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         </div>
         <div className="p-4">
           <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-            Preview
+            {t.paywall.previewLabel}
           </p>
           <p className="font-display text-base font-bold leading-tight text-[var(--color-ink)]">
-            Your migration map
+            {t.paywall.migrationTeaserTitle}
           </p>
           <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
-            The routes your ancestors likely walked, sailed, and traded across.
+            {t.paywall.migrationTeaserSub}
           </p>
         </div>
       </Card>
@@ -384,9 +350,9 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
       {/* What you'll discover */}
       <section className="mb-6">
         <p className="mb-2 text-center text-xs font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          What you&apos;ll discover
+          {t.paywall.discoverEyebrow}
         </p>
-        <h2 className="mb-4 text-center text-2xl">Inside your full report</h2>
+        <h2 className="mb-4 text-center text-2xl">{t.paywall.discoverHeading}</h2>
         <ul className="space-y-2.5">
           {REPORT_FEATURES.map((f) => (
             <li
@@ -414,11 +380,11 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
       {/* Tier picker */}
       <div id="paywall-pricing" className="mb-2 scroll-mt-24 text-center">
         <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          Pick your access
+          {t.paywall.pickAccessLabel}
         </p>
       </div>
       <div className="mb-4 space-y-3">
-        {PLANS.map((p) => {
+        {PLAN_STATICS.map((p) => {
           const active = p.key === selected;
           return (
             <button
@@ -432,9 +398,9 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
                   : "ring-1 ring-[var(--color-line)] opacity-90 hover:opacity-100",
               )}
             >
-              {p.badge && (
+              {p.badged && (
                 <span className="absolute -top-2.5 left-4 rounded-full bg-[var(--color-orange)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                  {p.badge}
+                  {t.paywall.planBadgeMostPopular}
                 </span>
               )}
               <div className="flex items-center gap-3">
@@ -449,7 +415,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
                 <div className="flex-1">
                   <div className="flex items-baseline justify-between">
                     <span className="font-display text-lg font-bold text-[var(--color-ink)]">
-                      {p.label}
+                      {t.paywall[p.labelKey]}
                     </span>
                     <div className="flex items-baseline gap-2">
                       <span className="text-sm text-[var(--color-ink-muted)] line-through tabular">
@@ -476,14 +442,16 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
             disabled={busy}
             className="mb-2"
           >
-            {busy ? "Charging…" : `Charge ${savedPm.label} for ${plan.intro}`}
+            {busy
+              ? t.paywall.chargingButton
+              : fmt(t.paywall.chargeButton, { label: savedPm.label, price: planStatic.intro })}
           </Button>
           <button
             type="button"
-            onClick={() => router.push(`/checkout?plan=${selected}&analysis=${analysisId}`)}
+            onClick={() => router.push(localizeHref(`/checkout?plan=${selected}&analysis=${analysisId}`, locale))}
             className="mb-3 w-full text-center text-xs text-[var(--color-ink-muted)] hover:text-[var(--color-ink-soft)]"
           >
-            Use a different payment method
+            {t.paywall.useDifferentCard}
           </button>
           {chargeError && (
             <p className="mb-3 rounded-[var(--radius-input)] bg-[var(--color-coral)]/10 p-3 text-center text-sm text-[var(--color-coral)]">
@@ -493,14 +461,16 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         </>
       ) : (
         <Button size="block" onClick={startCheckout} disabled={busy} className="mb-3">
-          {busy ? "Loading…" : `Unlock my report — ${plan.intro}`}
+          {busy ? t.paywall.loading : fmt(t.paywall.unlockMyReportPriced, { price: planStatic.intro })}
         </Button>
       )}
 
       <p className="mb-6 text-center text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
-        Your {introPeriod} trial will cost only {plan.introCents}.
-        Without cancellation before the selected discounted intro plan ends, I accept that
-        Facelineage will automatically charge {plan.recurringCents} until I cancel.
+        {fmt(t.paywall.autoRenew, {
+          period: planPeriod,
+          introPrice: planStatic.intro,
+          recurring: planRecurringText,
+        })}
       </p>
 
       {/* Money-back inline reassurance */}
@@ -511,10 +481,10 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         </div>
         <div>
           <p className="font-display text-base font-bold text-[var(--color-ink)]">
-            30-day money-back guarantee
+            {t.paywall.refundTitle}
           </p>
           <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
-            Not loving your report? Email us and we&apos;ll refund you. No hoops, no questions.
+            {t.paywall.refundBody}
           </p>
         </div>
       </Card>
@@ -522,8 +492,23 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
       {/* Testimonials — same as landing page (with group photo) */}
       <div className="-mx-5">
         <TestimonialsSection
-          heading="Loved by 12,000+ explorers"
+          heading={t.paywall.testimonialsHeading}
           count={3}
+          bigNumber={t.landing.trustBigNumber}
+          bigNumberSub={t.landing.trustBigNumberSub}
+          rating={t.landing.trustRating}
+          ratingSub={t.landing.trustRatingSub}
+          outOf5Label={t.landing.trustOutOf5}
+          verifiedOnLabel={t.landing.trustVerifiedOn}
+          starsAlt={t.landing.trust5Stars}
+          groupImageAlt={t.landing.testimonialsImageAlt}
+          quoteOverrides={{
+            "Maya R.": t.testimonialQuotes.mayaR,
+            "Daniel K.": t.testimonialQuotes.danielK,
+            "Priya S.": t.testimonialQuotes.priyaS,
+            "Carlos M.": t.testimonialQuotes.carlosM,
+            "Aiko T.": t.testimonialQuotes.aikoT,
+          }}
         />
       </div>
 
@@ -535,17 +520,13 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
             <img src={ICON.guaranteeBig} alt="" aria-hidden className="h-full w-full object-contain" />
           </div>
           <h3 className="mb-3 font-display text-xl font-bold text-[var(--color-ink)]">
-            Loved it, or get your money back
+            {t.paywall.bigTrustGuaranteeTitle}
           </h3>
           <p className="text-sm leading-relaxed text-[var(--color-ink-soft)]">
-            Reading the story written into your face is something we take seriously. Every
-            report is built to feel personal, surprising, and worth keeping — not a generic
-            algorithm output dressed up with stock copy.
+            {t.paywall.bigTrustGuaranteeP1}
           </p>
           <p className="mt-3 text-sm leading-relaxed text-[var(--color-ink-soft)]">
-            If yours doesn&apos;t hit that bar — or you simply change your mind — send us a
-            line within 30 days. We&apos;ll refund the full amount. No forms, no reasons to
-            explain, no awkward follow-ups.
+            {t.paywall.bigTrustGuaranteeP2}
           </p>
         </Card>
 
@@ -555,28 +536,25 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
             <img src={ICON.privacyBig} alt="" aria-hidden className="h-full w-full object-contain" />
           </div>
           <h3 className="mb-3 font-display text-xl font-bold text-[var(--color-ink)]">
-            Your selfie stays yours
+            {t.paywall.bigTrustPrivacyTitle}
           </h3>
           <p className="text-sm leading-relaxed text-[var(--color-ink-soft)]">
-            Your photo does one job: powering your single heritage analysis. It travels over
-            an encrypted connection, sits on our servers only as long as we need it, and
-            auto-deletes after 30 days.
+            {t.paywall.bigTrustPrivacyP1}
           </p>
           <p className="mt-3 text-sm leading-relaxed text-[var(--color-ink-soft)]">
-            We never sell it, never hand it to advertisers, and never feed it back into a
-            training set. Want it gone sooner? Wipe it from your account in one tap.
+            {t.paywall.bigTrustPrivacyP2}
           </p>
         </Card>
       </div>
 
       {/* Final reassurance CTA */}
       <Card className="mt-6 bg-[var(--color-orange-pale)] text-center !p-5">
-        <h3 className="mb-1 font-display text-xl">Your story is one tap away</h3>
+        <h3 className="mb-1 font-display text-xl">{t.paywall.finalCtaTitle}</h3>
         <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
-          Cancel anytime · Refund within 30 days · Photo deleted in 30 days
+          {t.paywall.finalCtaSub}
         </p>
         <Button size="block" onClick={startCheckout} disabled={busy}>
-          {busy ? "Loading…" : `Unlock for ${plan.intro}`}
+          {busy ? t.paywall.loading : fmt(t.paywall.finalCtaButton, { price: planStatic.intro })}
         </Button>
       </Card>
     </div>

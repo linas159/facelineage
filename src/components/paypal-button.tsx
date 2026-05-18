@@ -6,6 +6,7 @@ import type {
   ConfirmPaymentData,
   CreatePaymentMethodPayPalData,
 } from "@stripe/stripe-js";
+import { useI18n } from "@/lib/i18n/client";
 
 interface PayPalButtonProps {
   clientSecret: string;
@@ -25,6 +26,7 @@ interface PayPalButtonProps {
  * launched from our own UI.
  */
 export function PayPalButton({ clientSecret, returnUrl }: PayPalButtonProps) {
+  const { t } = useI18n();
   const stripe = useStripe();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,14 +36,11 @@ export function PayPalButton({ clientSecret, returnUrl }: PayPalButtonProps) {
     setBusy(true);
     setError(null);
 
-    // Create a PayPal PaymentMethod first (typed flow), then confirm the
-    // PaymentIntent using it. Stripe redirects to PayPal during confirm —
-    // the user authorizes there and is sent back to `return_url`.
     const { paymentMethod, error: pmErr } = await stripe.createPaymentMethod({
       type: "paypal",
     } satisfies CreatePaymentMethodPayPalData);
     if (pmErr || !paymentMethod) {
-      setError(pmErr?.message ?? "Could not start PayPal");
+      setError(pmErr?.message ?? t.checkout.paypalFailed);
       setBusy(false);
       return;
     }
@@ -55,7 +54,7 @@ export function PayPalButton({ clientSecret, returnUrl }: PayPalButtonProps) {
       confirmParams,
     });
     if (err) {
-      setError(err.message ?? "Could not start PayPal checkout");
+      setError(err.message ?? t.checkout.paypalFailed);
       setBusy(false);
     }
     // Success path: Stripe redirects; nothing to do here.
@@ -67,7 +66,7 @@ export function PayPalButton({ clientSecret, returnUrl }: PayPalButtonProps) {
         type="button"
         onClick={handleClick}
         disabled={busy || !stripe}
-        aria-label="Pay with PayPal"
+        aria-label={t.checkout.payWithPaypalAria}
         style={{
           width: "100%",
           height: 48,
@@ -91,7 +90,7 @@ export function PayPalButton({ clientSecret, returnUrl }: PayPalButtonProps) {
       >
         {busy ? (
           <span style={{ fontSize: 14, fontWeight: 600, color: "#253B80" }}>
-            Redirecting to PayPal…
+            {t.checkout.paypalRedirecting}
           </span>
         ) : (
           <PayPalLogo />

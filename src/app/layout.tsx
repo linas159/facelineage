@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Outfit, Signika } from "next/font/google";
 import "./globals.css";
+import { getDictionary, getLocale } from "@/lib/i18n/server";
+import { I18nProvider } from "@/lib/i18n/client";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -23,26 +25,36 @@ export const viewport: Viewport = {
   themeColor: "#fff5e8",
 };
 
-export const metadata: Metadata = {
-  title: "Facelineage — Discover your ancestry from a single photo",
-  description:
-    "AI-powered heritage analysis. Upload a selfie, discover where in the world your face comes from.",
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
-  openGraph: {
-    title: "Facelineage",
-    description: "Discover your ancestry from a single photo.",
-    type: "website",
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const dict = await getDictionary();
+  return {
+    title: dict.meta.title,
+    description: dict.meta.description,
+    metadataBase: new URL(
+      process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    ),
+    openGraph: {
+      title: "Facelineage",
+      description: dict.meta.description,
+      type: "website",
+    },
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const locale = await getLocale();
+  const dict = await getDictionary();
   return (
-    <html lang="en" className={`${outfit.variable} ${signika.variable}`}>
-      <body>{children}</body>
+    <html lang={locale} className={`${outfit.variable} ${signika.variable}`}>
+      <body>
+        <I18nProvider locale={locale} dict={dict}>
+          {children}
+        </I18nProvider>
+      </body>
     </html>
   );
 }

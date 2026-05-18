@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { stripe, resolveCustomerEmail, PLANS, type PlanKey } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { provisionIntroPayment } from "@/lib/provisioning";
+import { getLocale, localized } from "@/lib/i18n/server";
 import { FunnelShell } from "@/components/funnel-shell";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 
@@ -160,9 +161,15 @@ export default async function PaymentCompletePage({
     return failed("Couldn't sign you in automatically. Please log in via the email we sent.");
   }
 
+  // Preserve locale through the magic-link redirect. /auth/confirm itself
+  // is not localized (middleware excludes /auth/*), but the `next` URL it
+  // ultimately redirects to must include the /ro prefix so the report
+  // page + popups render in the user's locale.
+  const locale = await getLocale();
+  const nextPath = localized(`/report/${analysisId}`, locale);
   redirect(
     `${baseUrl}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}` +
-      `&type=magiclink&next=${encodeURIComponent(`/report/${analysisId}`)}`,
+      `&type=magiclink&next=${encodeURIComponent(nextPath)}`,
   );
 }
 

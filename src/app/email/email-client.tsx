@@ -4,11 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, Chip } from "@/components/ui/card";
+import { useI18n, localizeHref } from "@/lib/i18n/client";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function EmailClient({ initialEmail }: { initialEmail: string }) {
   const router = useRouter();
+  const { t, locale } = useI18n();
   const [email, setEmail] = useState(initialEmail);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +20,7 @@ export function EmailClient({ initialEmail }: { initialEmail: string }) {
     setError(null);
     const trimmed = email.trim().toLowerCase();
     if (!EMAIL_RE.test(trimmed)) {
-      setError("Please enter a valid email address.");
+      setError(t.email.invalid);
       return;
     }
     setBusy(true);
@@ -30,22 +32,25 @@ export function EmailClient({ initialEmail }: { initialEmail: string }) {
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? "Could not save email");
+        throw new Error(j.error ?? t.email.saveFailed);
       }
-      router.push("/paywall");
+      router.push(localizeHref("/paywall", locale));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save email");
+      setError(err instanceof Error ? err.message : t.email.saveFailed);
       setBusy(false);
     }
   }
 
+  // Build the "By continuing you agree…" line with embedded links.
+  const termsParts = t.email.terms.split(/(\{terms\}|\{privacy\})/);
+
   return (
     <div className="pt-6">
       <div className="mb-6 text-center">
-        <Chip color="green" className="mb-3">Your analysis is ready</Chip>
-        <h1 className="mb-2 text-balance">Where should we send your report?</h1>
+        <Chip color="green" className="mb-3">{t.email.chip}</Chip>
+        <h1 className="mb-2 text-balance">{t.email.headline}</h1>
         <p className="mx-auto max-w-sm text-sm text-[var(--color-ink-soft)]">
-          We&rsquo;ll email your heritage breakdown, ancestor portrait, and a link to revisit anytime.
+          {t.email.body}
         </p>
       </div>
 
@@ -56,7 +61,7 @@ export function EmailClient({ initialEmail }: { initialEmail: string }) {
               htmlFor="email"
               className="mb-1.5 block text-sm font-semibold text-[var(--color-ink)]"
             >
-              Email address
+              {t.email.label}
             </label>
             <input
               id="email"
@@ -67,7 +72,7 @@ export function EmailClient({ initialEmail }: { initialEmail: string }) {
               autoFocus
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
+              placeholder={t.email.placeholder}
               className="h-12 w-full rounded-[12px] border border-[var(--color-line-strong)] bg-white px-4 text-base text-[var(--color-ink)] placeholder:text-[var(--color-ink-faint)] focus:border-[var(--color-orange)] focus:outline-none focus:ring-1 focus:ring-[var(--color-orange)]"
             />
           </div>
@@ -79,13 +84,27 @@ export function EmailClient({ initialEmail }: { initialEmail: string }) {
           )}
 
           <Button size="block" type="submit" disabled={busy}>
-            {busy ? "Saving…" : "Continue"}
+            {busy ? t.email.saving : t.email.button}
           </Button>
 
           <p className="text-center text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
-            We&rsquo;ll never share your email. By continuing you agree to our{" "}
-            <a href="/terms" className="underline">Terms</a> and{" "}
-            <a href="/privacy" className="underline">Privacy Policy</a>.
+            {termsParts.map((part, i) => {
+              if (part === "{terms}") {
+                return (
+                  <a key={i} href={localizeHref("/terms", locale)} className="underline">
+                    {t.email.termsLink}
+                  </a>
+                );
+              }
+              if (part === "{privacy}") {
+                return (
+                  <a key={i} href={localizeHref("/privacy", locale)} className="underline">
+                    {t.email.privacyLink}
+                  </a>
+                );
+              }
+              return <span key={i}>{part}</span>;
+            })}
           </p>
         </form>
       </Card>

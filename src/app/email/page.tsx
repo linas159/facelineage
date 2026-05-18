@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { FunnelShell } from "@/components/funnel-shell";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { EmailClient } from "./email-client";
+import { getLocale, localized } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,8 @@ export const dynamic = "force-dynamic";
 export default async function EmailPage() {
   const jar = await cookies();
   const analysisId = jar.get("fl_pending_analysis_id")?.value;
-  if (!analysisId) redirect("/start");
+  const locale = await getLocale();
+  if (!analysisId) redirect(localized("/start", locale));
 
   // Already signed in? Stamp the email on the analysis and skip ahead.
   const sb = await createClient();
@@ -30,7 +32,7 @@ export default async function EmailPage() {
       .from("analyses")
       .update({ email: user.email.toLowerCase(), user_id: user.id })
       .eq("id", analysisId);
-    redirect("/paywall");
+    redirect(localized("/paywall", locale));
   }
 
   // Prefill if we already stored an email on this analysis (back nav).
