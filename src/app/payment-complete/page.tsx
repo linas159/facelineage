@@ -183,17 +183,35 @@ async function getOrCreateUser(
   const existing = list?.users.find(
     (u) => u.email?.toLowerCase() === email.toLowerCase(),
   );
-  if (existing) return existing;
-
-  const { data: created, error } = await db.auth.admin.createUser({
-    email,
-    email_confirm: true,
-  });
-  if (error) {
-    console.error("createUser failed:", error);
-    return null;
+  let user = existing ?? null;
+  if (!user) {
+    const { data: created, error } = await db.auth.admin.createUser({
+      email,
+      email_confirm: true,
+    });
+    if (error) {
+      console.error("createUser failed:", error);
+      return null;
+    }
+    user = created.user;
   }
-  return created.user;
+
+  // Ensure a row exists in public.profiles. Normally created by the
+  // `on_auth_user_created` trigger on auth.users INSERT, but that won't fire
+  // for orphaned auth users (e.g. a manual `delete from profiles` that
+  // didn't cascade upwards). Without this row, every downstream insert
+  // (analyses/subscriptions/purchases) silently fails the FK to profiles.
+  const { error: profErr } = await db
+    .from("profiles")
+    .upsert(
+      { id: user.id, email: user.email ?? email },
+      { onConflict: "id", ignoreDuplicates: false },
+    );
+  if (profErr) {
+    console.error("profiles upsert failed:", profErr);
+  }
+
+  return user;
 }
 
 function failed(message: string) {
