@@ -5,6 +5,7 @@ import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { PLANS, formatPrice, pickCurrency } from "@/lib/stripe";
 import { getLocale, getDictionary } from "@/lib/i18n/server";
+import { ManagePortalButton, DeleteDataButton } from "./account-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -77,12 +78,7 @@ export default async function AccountPage() {
           </CardDescription>
           {sub && (
             <div className="space-y-2">
-              <Button size="block" variant="secondary">
-                Manage in Stripe Portal
-              </Button>
-              <Button size="block" variant="ghost">
-                Cancel subscription
-              </Button>
+              <ManagePortalButton />
             </div>
           )}
         </Card>
@@ -92,9 +88,7 @@ export default async function AccountPage() {
           <CardDescription className="mt-1 mb-4">
             Your photos are auto-deleted 30 days after upload. You can delete them sooner here.
           </CardDescription>
-          <Button size="block" variant="ghost">
-            Delete all my data
-          </Button>
+          <DeleteDataButton />
         </Card>
       </div>
     </FunnelShell>
