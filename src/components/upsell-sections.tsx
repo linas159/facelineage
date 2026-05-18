@@ -358,6 +358,10 @@ interface UpsellPopupSequenceProps {
    *  waiting for the bottom-of-page sentinel to scroll into view. Used on
    *  the "report generating" screen — the user is already engaged. */
   triggerOnMount?: boolean;
+  /** Fired the first time the sequence reaches its end (user has dismissed
+   *  the last modal). Used by the generating-flow wrapper to gate the
+   *  redirect to the full report on upsell completion. */
+  onAllDone?: () => void;
 }
 
 /**
@@ -379,6 +383,7 @@ export function UpsellPopupSequence({
   ids,
   analysisId,
   triggerOnMount = false,
+  onAllDone,
 }: UpsellPopupSequenceProps) {
   const { t, locale } = useI18n();
   const currency = pickCurrency(locale);
@@ -388,6 +393,17 @@ export function UpsellPopupSequence({
   const [busy, setBusy] = useState<UpsellId | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const triggered = useRef(false);
+  const allDoneFired = useRef(false);
+
+  // Tell the parent the sequence has finished — used to gate the generating
+  // page's auto-refresh until the user has actually dismissed every modal.
+  useEffect(() => {
+    if (allDoneFired.current) return;
+    if (step >= 0 && step >= list.length) {
+      allDoneFired.current = true;
+      onAllDone?.();
+    }
+  }, [step, list.length, onAllDone]);
 
   useEffect(() => {
     if (triggerOnMount) {

@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
 import { provisionIntroPayment } from "@/lib/provisioning";
+import { getOrCreateAuthUser } from "@/lib/auth-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -230,25 +231,14 @@ async function handleInvoicePaid(
     return;
   }
 
-  // 2. Find or create the Supabase user.
-  let userId: string | undefined;
-  const { data: list } = await db.auth.admin.listUsers();
-  const existing = list?.users.find(
-    (u) => u.email?.toLowerCase() === email.toLowerCase(),
-  );
-  if (existing) {
-    userId = existing.id;
-  } else {
-    const { data: created } = await db.auth.admin.createUser({
-      email,
-      email_confirm: true,
-    });
-    if (created?.user) userId = created.user.id;
-  }
-  if (!userId) {
+  // 2. Find or create the Supabase user. Race-safe — /payment-complete
+  // may be calling this exact path concurrently for the same email.
+  const user = await getOrCreateAuthUser(db, email);
+  if (!user) {
     console.error(`[invoice.paid] failed to provision Supabase user for ${email}`);
     return;
   }
+  const userId = user.id;
   console.log(`[invoice.paid] userId=${userId}`);
 
   // Belt-and-suspenders: this exact flow also runs from /payment-complete

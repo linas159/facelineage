@@ -9,14 +9,20 @@ interface Props {
   analysisId: string;
   initialStatus: "queued" | "running" | "failed";
   initialError?: string;
+  /** Optional: when provided, called the first time polling sees the
+   *  status flip to `ready`. The parent decides when to actually refresh.
+   *  When omitted, falls back to router.refresh() so callers that don't
+   *  need a gate still work. */
+  onReady?: () => void;
 }
 
 /**
  * Shown on the report page while the post-payment AI pipeline is still
- * running. Polls /api/report-status/[id] every 4s and refreshes the page
- * when the row flips to `ready`.
+ * running. Polls /api/report-status/[id] every 4s. When status flips to
+ * `ready`, calls `onReady` if provided, otherwise refreshes the page
+ * directly.
  */
-export function GeneratingState({ analysisId, initialStatus, initialError }: Props) {
+export function GeneratingState({ analysisId, initialStatus, initialError, onReady }: Props) {
   const router = useRouter();
   const { t } = useI18n();
   const PHASES = [
@@ -48,7 +54,8 @@ export function GeneratingState({ analysisId, initialStatus, initialError }: Pro
         if (j.status === "ready") {
           clearInterval(pollTimer);
           clearInterval(phaseTimer);
-          router.refresh();
+          if (onReady) onReady();
+          else router.refresh();
         }
       } catch {}
     };
@@ -60,7 +67,7 @@ export function GeneratingState({ analysisId, initialStatus, initialError }: Pro
       clearInterval(pollTimer);
       clearInterval(phaseTimer);
     };
-  }, [analysisId, status, router]);
+  }, [analysisId, status, router, onReady]);
 
   if (status === "failed") {
     return (

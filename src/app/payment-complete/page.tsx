@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { stripe, resolveCustomerEmail, PLANS, type PlanKey } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { provisionIntroPayment } from "@/lib/provisioning";
+import { getOrCreateAuthUser } from "@/lib/auth-user";
 import { getLocale, localized } from "@/lib/i18n/server";
 import { FunnelShell } from "@/components/funnel-shell";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
@@ -86,7 +87,9 @@ export default async function PaymentCompletePage({
 
   // 2. Find or create the Supabase user. We use the admin API so we can
   // auto-confirm their email (they just proved ownership via Stripe).
-  const user = await getOrCreateUser(db, email);
+  // The shared helper is race-safe — the Stripe webhook may be running
+  // this exact step concurrently for the same email.
+  const user = await getOrCreateAuthUser(db, email);
   if (!user) {
     return failed("Couldn't provision your account. Please contact support.");
   }
@@ -171,47 +174,6 @@ export default async function PaymentCompletePage({
     `${baseUrl}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}` +
       `&type=magiclink&next=${encodeURIComponent(nextPath)}`,
   );
-}
-
-async function getOrCreateUser(
-  db: ReturnType<typeof createServiceClient>,
-  email: string,
-) {
-  // Check existing user. The admin API doesn't have a "get by email" helper,
-  // so we use listUsers with an email filter (Supabase 2024+).
-  const { data: list } = await db.auth.admin.listUsers();
-  const existing = list?.users.find(
-    (u) => u.email?.toLowerCase() === email.toLowerCase(),
-  );
-  let user = existing ?? null;
-  if (!user) {
-    const { data: created, error } = await db.auth.admin.createUser({
-      email,
-      email_confirm: true,
-    });
-    if (error) {
-      console.error("createUser failed:", error);
-      return null;
-    }
-    user = created.user;
-  }
-
-  // Ensure a row exists in public.profiles. Normally created by the
-  // `on_auth_user_created` trigger on auth.users INSERT, but that won't fire
-  // for orphaned auth users (e.g. a manual `delete from profiles` that
-  // didn't cascade upwards). Without this row, every downstream insert
-  // (analyses/subscriptions/purchases) silently fails the FK to profiles.
-  const { error: profErr } = await db
-    .from("profiles")
-    .upsert(
-      { id: user.id, email: user.email ?? email },
-      { onConflict: "id", ignoreDuplicates: false },
-    );
-  if (profErr) {
-    console.error("profiles upsert failed:", profErr);
-  }
-
-  return user;
 }
 
 function failed(message: string) {

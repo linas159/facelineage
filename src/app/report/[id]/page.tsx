@@ -4,8 +4,8 @@ import { FunnelShell } from "@/components/funnel-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { EthnicityExplorer } from "@/components/report/ethnicity-explorer";
-import { GeneratingState } from "@/components/report/generating-state";
-import { UpsellPopupSequence, type UpsellId } from "@/components/upsell-sections";
+import { GeneratingFlow } from "@/components/report/generating-flow";
+import type { UpsellId } from "@/components/upsell-sections";
 import { loadReport } from "@/lib/report-loader";
 import type { UpsellSku } from "@/lib/report-loader";
 
@@ -61,20 +61,15 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
             Sit tight — we&apos;re reading your selfie, mapping your regions, and painting your ancestor portrait.
           </p>
         </div>
-        <GeneratingState
+        {/* Wrapper coordinates the spinner + upsell popups so the
+            page only swaps to the full report once both the pipeline
+            is ready and the user has dismissed every upsell modal. */}
+        <GeneratingFlow
           analysisId={id}
           initialStatus={initialStatus}
           initialError={report.errorMessage}
+          upsellIds={unownedIds}
         />
-        {/* Upsell popup fires immediately while the user waits — perfect
-            captive moment to surface add-ons. */}
-        {unownedIds.length > 0 && (
-          <UpsellPopupSequence
-            analysisId={id}
-            ids={unownedIds}
-            triggerOnMount
-          />
-        )}
       </FunnelShell>
     );
   }
