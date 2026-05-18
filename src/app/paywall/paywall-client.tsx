@@ -25,9 +25,9 @@ type PlanStatic = {
 };
 
 const PLAN_STATICS: PlanStatic[] = [
-  { key: "sub_intro_3d", labelKey: "planLabel3d", periodKey: "period3d", recurringPattern: "recurringWeekly",  badged: true  },
-  { key: "sub_intro_7d", labelKey: "planLabel7d", periodKey: "period7d", recurringPattern: "recurringWeekly",  badged: false },
-  { key: "sub_intro_1m", labelKey: "planLabel1m", periodKey: "period1m", recurringPattern: "recurringMonthly", badged: false },
+  { key: "sub_intro_3d", labelKey: "planLabel3d", periodKey: "period3d", recurringPattern: "recurringWeekly",  badged: false },
+  { key: "sub_intro_7d", labelKey: "planLabel7d", periodKey: "period7d", recurringPattern: "recurringWeekly",  badged: true  },
+  { key: "sub_intro_1m", labelKey: "planLabel1m" , periodKey: "period1m", recurringPattern: "recurringMonthly", badged: false },
 ];
 
 type PlanDisplay = PlanStatic & {
@@ -68,7 +68,7 @@ interface PaywallClientProps {
 export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
   const router = useRouter();
   const { t, locale } = useI18n();
-  const [selected, setSelected] = useState<PlanKey>("sub_intro_3d");
+  const [selected, setSelected] = useState<PlanKey>("sub_intro_7d");
   const [busy, setBusy] = useState(false);
   const [chargeError, setChargeError] = useState<string | null>(null);
   const [selfieSrc, setSelfieSrc] = useState<string | null>(null);

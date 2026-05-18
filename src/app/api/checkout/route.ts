@@ -118,12 +118,24 @@ export async function POST(req: NextRequest) {
     expand: ["latest_invoice.payment_intent"],
   };
 
+  // PayPal + Link only support USD/EUR (and a few others) — not RON. Drop
+  // them for currencies they don't cover so Stripe doesn't reject the sub
+  // create with "payment method type X does not support currency Y".
+  const PM_CURRENCIES: Record<string, Set<Stripe.SubscriptionCreateParams.PaymentSettings.PaymentMethodType>> = {
+    usd: new Set(["card", "paypal", "link"]),
+    eur: new Set(["card", "paypal", "link"]),
+    ron: new Set(["card"]),
+  };
+  const walletsMethods = Array.from(
+    PM_CURRENCIES[currency] ?? new Set(["card"]),
+  ) as Stripe.SubscriptionCreateParams.PaymentSettings.PaymentMethodType[];
+
   const [subWallets, subCard] = await Promise.all([
     stripe.subscriptions.create({
       ...baseSubParams,
       payment_settings: {
         save_default_payment_method: "on_subscription",
-        payment_method_types: ["card", "paypal", "link"],
+        payment_method_types: walletsMethods,
       },
       metadata: { ...baseMetadata, flow: "wallets" },
     }),

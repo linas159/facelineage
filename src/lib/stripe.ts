@@ -61,10 +61,14 @@ export function isCurrency(s: string | null | undefined): s is Currency {
   return !!s && (SUPPORTED_CURRENCIES as readonly string[]).includes(s.toLowerCase());
 }
 
-/** Map locale → checkout currency. New locales: add a row here. */
+/** Map locale → checkout currency. New locales: add a row here.
+ * Note: Romania uses EUR here (not RON) because PayPal + Link don't
+ * support RON. Card + Apple/Google Pay work in any currency, but losing
+ * PayPal/Link narrows checkout options too much. EUR is widely accepted
+ * in Romania for digital products. */
 const LOCALE_TO_CURRENCY: Record<string, Currency> = {
   en: "usd",
-  ro: "ron",
+  ro: "eur",
 };
 
 export function pickCurrency(locale: string | null | undefined): Currency {
@@ -138,7 +142,7 @@ export const PLANS = {
     introPeriod: "7 days",
     recurringInterval: "week" as const,
     recurringPeriod: "week",
-    intro: { usd: 449, eur: 449, ron: 1700 } satisfies Amounts,
+    intro: { usd: 395, eur: 395, ron: 1500 } satisfies Amounts,
     recurring: { usd: 2499, eur: 2499, ron: 9900 } satisfies Amounts,
     original: { usd: 1299, eur: 1299, ron: 4900 } satisfies Amounts,
   },
@@ -148,7 +152,7 @@ export const PLANS = {
     introPeriod: "1 month",
     recurringInterval: "month" as const,
     recurringPeriod: "month",
-    intro: { usd: 1799, eur: 1799, ron: 6900 } satisfies Amounts,
+    intro: { usd: 1395, eur: 1395, ron: 5500 } satisfies Amounts,
     recurring: { usd: 4799, eur: 4799, ron: 18900 } satisfies Amounts,
     original: { usd: 3999, eur: 3999, ron: 15900 } satisfies Amounts,
   },
