@@ -12,7 +12,7 @@ import {
 } from "@stripe/react-stripe-js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { PLANS, type PlanKey } from "@/lib/stripe";
+import { PLANS, currencySupportsPayPal, type PlanKey } from "@/lib/stripe";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
 import { PayPalButton } from "@/components/paypal-button";
 import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
@@ -223,10 +223,12 @@ export function CheckoutClient(props: CheckoutClientProps) {
         >
           <div className="space-y-2">
             <ExpressSection redirectTarget={redirectTarget} />
-            <PayPalButton
-              clientSecret={init.walletsClientSecret ?? init.clientSecret!}
-              returnUrl={redirectTarget}
-            />
+            {currencySupportsPayPal(init.currency) && (
+              <PayPalButton
+                clientSecret={init.walletsClientSecret ?? init.clientSecret!}
+                returnUrl={redirectTarget}
+              />
+            )}
           </div>
         </Elements>
       )}

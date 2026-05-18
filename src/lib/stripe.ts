@@ -103,6 +103,18 @@ export function formatPrice(
 }
 
 /**
+ * Stripe payment-method support by currency. The wallets-subscription PM
+ * filter in /api/checkout uses the same set. Kept here so the client can
+ * decide whether to render its custom PayPal button (Stripe's
+ * ExpressCheckoutElement auto-hides Link itself).
+ */
+const PAYPAL_CURRENCIES: ReadonlySet<Currency> = new Set(["usd", "eur"]);
+
+export function currencySupportsPayPal(currency: string | null | undefined): boolean {
+  return !!currency && PAYPAL_CURRENCIES.has(currency.toLowerCase() as Currency);
+}
+
+/**
  * Read the correct amount off a Stripe Price for the requested currency.
  * Falls back to the default `unit_amount` if `currency_options` doesn't
  * carry the target currency (defensive — shouldn't happen for prices
