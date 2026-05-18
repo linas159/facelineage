@@ -74,8 +74,11 @@ export async function POST(req: NextRequest) {
   // Prices created by `setup-stripe.mjs` hold all supported currencies
   // under `currency_options`; we pick the matching amount here so we don't
   // trust the client and so PaymentIntent.amount matches PaymentIntent.currency.
+  // currency_options is NOT included by default — must expand it explicitly.
   const priceId = priceIdFor(sku);
-  const price = await stripe.prices.retrieve(priceId);
+  const price = await stripe.prices.retrieve(priceId, {
+    expand: ["currency_options"],
+  });
   const amount = priceAmountFor(price, currency);
   if (!amount) {
     return NextResponse.json({ error: "Price misconfigured" }, { status: 500 });

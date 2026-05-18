@@ -43,10 +43,12 @@ export async function GET(req: Request) {
   const windowEnd = now + 30 * 3600;
 
   // Stripe lets us page subscriptions by trial_end range. We only want
-  // trialing subs (not active / canceled).
+  // trialing subs (not active / canceled). Expand currency_options on the
+  // item's price so we can read the correct alt-currency amount below.
   const subs = await stripe.subscriptions.list({
     status: "trialing",
     limit: 100,
+    expand: ["data.items.data.price.currency_options"],
   });
 
   const db = createServiceClient();

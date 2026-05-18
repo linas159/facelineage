@@ -124,7 +124,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ requiresCheckout: true });
   }
 
-  const price = await stripe.prices.retrieve(priceIdFor(sku));
+  // currency_options is NOT included by default — must expand it explicitly,
+  // otherwise priceAmountFor falls back to unit_amount (USD value) and we
+  // undercharge non-USD customers.
+  const price = await stripe.prices.retrieve(priceIdFor(sku), {
+    expand: ["currency_options"],
+  });
   const amount = priceAmountFor(price, currency);
   if (!amount) {
     return NextResponse.json({ error: "Price misconfigured" }, { status: 500 });
