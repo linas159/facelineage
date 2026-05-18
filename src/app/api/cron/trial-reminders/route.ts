@@ -34,9 +34,13 @@ export async function GET(req: Request) {
   const FROM = process.env.EMAIL_FROM ?? "Facelineage <reports@facelineage.com>";
   const REPLY_TO = process.env.EMAIL_REPLY_TO ?? "support@facelineage.com";
 
+  // We run once a day on Hobby (Vercel restriction). Widen the window
+  // to 0–30h so nothing falls through the gap between daily runs. The
+  // per-subscription `trial_reminder_sent` metadata flag prevents
+  // duplicate emails even though the window now overlaps days.
   const now = Math.floor(Date.now() / 1000);
-  const windowStart = now + 23 * 3600;
-  const windowEnd = now + 25 * 3600;
+  const windowStart = now;
+  const windowEnd = now + 30 * 3600;
 
   // Stripe lets us page subscriptions by trial_end range. We only want
   // trialing subs (not active / canceled).
