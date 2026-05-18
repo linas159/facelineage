@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
+import { stripe, priceAmountFor, isCurrency } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { renderTrialEndingEmail } from "@/lib/email/templates";
 import { Resend } from "resend";
@@ -70,11 +70,20 @@ export async function GET(req: Request) {
     const email = (customer as { email?: string | null }).email;
     if (!email) continue;
 
-    // Recurring price + amount for the email body.
+    // Recurring price + amount for the email body. Use the subscription's
+    // currency (set when the user signed up) — `price.unit_amount` is the
+    // default-currency amount; the matching currency_options entry has the
+    // user's amount.
     const item = sub.items.data[0];
     const price = item?.price;
-    if (!price?.unit_amount) continue;
-    const recurringAmount = `$${(price.unit_amount / 100).toFixed(2)}/${price.recurring?.interval ?? "period"}`;
+    if (!price) continue;
+    const subCurrency = isCurrency(sub.currency) ? sub.currency : "usd";
+    const amount = priceAmountFor(price, subCurrency);
+    if (!amount) continue;
+    const recurringAmount = `${new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: subCurrency.toUpperCase(),
+    }).format(amount / 100)}/${price.recurring?.interval ?? "period"}`;
     const chargeDate = new Date(sub.trial_end * 1000).toLocaleDateString("en-US", {
       year: "numeric",
       month: "long",

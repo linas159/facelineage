@@ -113,7 +113,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
       // fires the fetch. This keeps a hard refresh on /checkout working
       // while making the paywall→checkout transition feel instant.
       if (props.mode === "intro" && props.plan) {
-        const data = await preloadCheckoutInit(props.plan, props.analysisId);
+        const data = await preloadCheckoutInit(props.plan, props.analysisId, locale);
         if (cancelled) return;
         if (data) setInit(data);
         else setError(t.checkout.couldNotStart);
@@ -124,7 +124,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
       const res = await fetch("/api/upsell-checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ upsell: props.upsellId, analysisId: props.analysisId }),
+        body: JSON.stringify({ upsell: props.upsellId, analysisId: props.analysisId, locale }),
       });
       if (!res.ok) {
         const txt = await res.text();
@@ -137,7 +137,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.mode, props.plan, props.upsellId, props.analysisId]);
+  }, [props.mode, props.plan, props.upsellId, props.analysisId, locale, t.checkout.couldNotStart]);
 
   const stripePromise = useMemo<Promise<StripeJs | null> | null>(() => {
     if (!init?.publishableKey) return null;
@@ -201,7 +201,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
               {t.checkout.chargedToday}
             </span>
             <span className="font-display text-3xl font-bold text-[var(--color-orange)] tabular">
-              {formatMoney(init.amount, init.currency)}
+              {formatMoney(init.amount, init.currency, locale)}
             </span>
           </div>
         </Card>
@@ -331,7 +331,7 @@ function CardSection({
   redirectTarget: string;
   customerEmail: string | null;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const stripe = useStripe();
   const elements = useElements();
   const router = useRouter();
@@ -425,7 +425,7 @@ function CardSection({
       )}
 
       <Button size="block" type="submit" disabled={busy || !stripe || !elements}>
-        {busy ? t.checkout.processing : fmt(t.checkout.pay, { price: formatMoney(amount, currency) })}
+        {busy ? t.checkout.processing : fmt(t.checkout.pay, { price: formatMoney(amount, currency, locale) })}
       </Button>
 
       <button
@@ -439,8 +439,13 @@ function CardSection({
   );
 }
 
-function formatMoney(cents: number, currency: string): string {
-  return new Intl.NumberFormat("en-US", {
+const INTL_LOCALE: Record<string, string> = {
+  en: "en-US",
+  ro: "ro-RO",
+};
+
+function formatMoney(cents: number, currency: string, locale = "en"): string {
+  return new Intl.NumberFormat(INTL_LOCALE[locale] ?? "en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
   }).format(cents / 100);

@@ -16,7 +16,9 @@ export const stripe = process.env.STRIPE_SECRET_KEY
  * Map of internal SKU → env var holding the Stripe price ID.
  *
  * Note: the intro fee is charged via a one-time PaymentIntent (not a Stripe
- * Price), so only recurring + upsell prices live in Stripe's catalog.
+ * Price), so only recurring + upsell prices live in Stripe's catalog. The
+ * recurring/upsell Prices each hold all supported currencies via Stripe's
+ * `currency_options` field — we pass `currency` at checkout time.
  */
 export const PRICE_ENV = {
   recur_week: "STRIPE_PRICE_RECUR_WEEK",
@@ -46,44 +48,124 @@ export const UPSELL_SKU_BY_UI_ID = {
   book: "upsell_v2_book",
 } as const satisfies Record<string, PriceSku>;
 
-/** Plan metadata — used by the UI. Source of truth for the chained pricing. */
+// ────────────────────────────────────────────────────────────────────────────
+// Currency / locale handling
+// ────────────────────────────────────────────────────────────────────────────
+
+export const SUPPORTED_CURRENCIES = ["usd", "eur", "ron"] as const;
+export type Currency = (typeof SUPPORTED_CURRENCIES)[number];
+
+export const DEFAULT_CURRENCY: Currency = "usd";
+
+export function isCurrency(s: string | null | undefined): s is Currency {
+  return !!s && (SUPPORTED_CURRENCIES as readonly string[]).includes(s.toLowerCase());
+}
+
+/** Map locale → checkout currency. New locales: add a row here. */
+const LOCALE_TO_CURRENCY: Record<string, Currency> = {
+  en: "usd",
+  ro: "ron",
+};
+
+export function pickCurrency(locale: string | null | undefined): Currency {
+  if (!locale) return DEFAULT_CURRENCY;
+  return LOCALE_TO_CURRENCY[locale] ?? DEFAULT_CURRENCY;
+}
+
+/** Intl.NumberFormat locale to use for each app locale. */
+const LOCALE_FOR_INTL: Record<string, string> = {
+  en: "en-US",
+  ro: "ro-RO",
+};
+
+/**
+ * Format a minor-unit amount as a localized currency string. Drops the
+ * decimal part when the amount is a whole major unit — so RON 27 renders
+ * as "27 RON" instead of "27,00 RON", while USD 195 stays "$1.95".
+ */
+export function formatPrice(
+  cents: number,
+  currency: Currency,
+  locale: string = "en",
+): string {
+  const intlLocale = LOCALE_FOR_INTL[locale] ?? "en-US";
+  const fractionDigits = cents % 100 === 0 ? 0 : 2;
+  return new Intl.NumberFormat(intlLocale, {
+    style: "currency",
+    currency: currency.toUpperCase(),
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(cents / 100);
+}
+
+/**
+ * Read the correct amount off a Stripe Price for the requested currency.
+ * Falls back to the default `unit_amount` if `currency_options` doesn't
+ * carry the target currency (defensive — shouldn't happen for prices
+ * created by `scripts/setup-stripe.mjs`).
+ */
+export function priceAmountFor(price: Stripe.Price, currency: Currency): number {
+  if (price.currency === currency) return price.unit_amount ?? 0;
+  return (
+    price.currency_options?.[currency]?.unit_amount ?? price.unit_amount ?? 0
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Plan catalog
+// ────────────────────────────────────────────────────────────────────────────
+
+type Amounts = Record<Currency, number>;
+
+/** Plan metadata — used by the UI + server. Holds amounts in every supported
+ * currency. The intro fee is charged via a one-time PaymentIntent so its
+ * amounts live here (not in Stripe's catalog). The recurring amounts mirror
+ * the Stripe Price's `currency_options` for the matching SKU. */
 export const PLANS = {
   sub_intro_3d: {
-    label: "3-Day Access",
-    introCents: 195,
+    labelKey: "planLabel3d" as const,
     introDays: 3,
-    recurringCents: 2499,
-    recurringInterval: "week" as const,
-    introPrice: "$1.95",
-    recurringPrice: "$24.99",
-    recurringPeriod: "week",
     introPeriod: "3 days",
+    recurringInterval: "week" as const,
+    recurringPeriod: "week",
+    intro: { usd: 195, eur: 195, ron: 750 } satisfies Amounts,
+    recurring: { usd: 2499, eur: 2499, ron: 9900 } satisfies Amounts,
+    original: { usd: 995, eur: 995, ron: 3900 } satisfies Amounts,
   },
   sub_intro_7d: {
-    label: "7-Day Access",
-    introCents: 699,
+    labelKey: "planLabel7d" as const,
     introDays: 7,
-    recurringCents: 2499,
-    recurringInterval: "week" as const,
-    introPrice: "$6.99",
-    recurringPrice: "$24.99",
-    recurringPeriod: "week",
     introPeriod: "7 days",
+    recurringInterval: "week" as const,
+    recurringPeriod: "week",
+    intro: { usd: 449, eur: 449, ron: 1700 } satisfies Amounts,
+    recurring: { usd: 2499, eur: 2499, ron: 9900 } satisfies Amounts,
+    original: { usd: 1299, eur: 1299, ron: 4900 } satisfies Amounts,
   },
   sub_intro_1m: {
-    label: "1-Month Access",
-    introCents: 1799,
+    labelKey: "planLabel1m" as const,
     introDays: 30,
-    recurringCents: 4799,
-    recurringInterval: "month" as const,
-    introPrice: "$17.99",
-    recurringPrice: "$47.99",
-    recurringPeriod: "month",
     introPeriod: "1 month",
+    recurringInterval: "month" as const,
+    recurringPeriod: "month",
+    intro: { usd: 1799, eur: 1799, ron: 6900 } satisfies Amounts,
+    recurring: { usd: 4799, eur: 4799, ron: 18900 } satisfies Amounts,
+    original: { usd: 3999, eur: 3999, ron: 15900 } satisfies Amounts,
   },
 } as const;
 
 export type PlanKey = keyof typeof PLANS;
+
+/** Strikethrough "was" prices for upsells — UI-only marketing, not in Stripe. */
+export const UPSELL_ORIGINAL: Record<PriceSku, Amounts | null> = {
+  recur_week: null,
+  recur_month: null,
+  upsell_v2_parents: { usd: 899, eur: 899, ron: 3500 },
+  upsell_v2_ethnicity: { usd: 1299, eur: 1299, ron: 4900 },
+  upsell_v2_ages: { usd: 1299, eur: 1299, ron: 4900 },
+  upsell_v2_partner: { usd: 1299, eur: 1299, ron: 4900 },
+  upsell_v2_book: { usd: 1799, eur: 1799, ron: 6900 },
+};
 
 /**
  * Resolve the customer's email from a Stripe PaymentMethod + PaymentIntent.

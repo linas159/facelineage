@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, Chip } from "@/components/ui/card";
@@ -9,27 +9,33 @@ import { Illustration } from "@/components/illustration";
 import { cn } from "@/lib/utils";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
 import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
+import { PLANS, formatPrice, pickCurrency, type PlanKey as StripePlanKey } from "@/lib/stripe";
 
 type PlanKey = "sub_intro_3d" | "sub_intro_7d" | "sub_intro_1m";
 
-// Plan numbers + currency are locale-independent. Labels + period words
-// come from the dictionary at render time.
+// Plan numbers come from PLANS in lib/stripe.ts (per-currency), labels +
+// period words from the dictionary. Per-locale price strings are computed
+// at render time via formatPrice.
 type PlanStatic = {
   key: PlanKey;
   labelKey: "planLabel3d" | "planLabel7d" | "planLabel1m";
   periodKey: "period3d" | "period7d" | "period1m";
   recurringPattern: "recurringWeekly" | "recurringMonthly";
-  intro: string;
-  recurring: string;
   badged: boolean;
-  original: string;
 };
 
 const PLAN_STATICS: PlanStatic[] = [
-  { key: "sub_intro_3d", labelKey: "planLabel3d", periodKey: "period3d", recurringPattern: "recurringWeekly", intro: "$1.95",  recurring: "$24.99", badged: true,  original: "$9.95" },
-  { key: "sub_intro_7d", labelKey: "planLabel7d", periodKey: "period7d", recurringPattern: "recurringWeekly", intro: "$6.99",  recurring: "$24.99", badged: false, original: "$19.99" },
-  { key: "sub_intro_1m", labelKey: "planLabel1m", periodKey: "period1m", recurringPattern: "recurringMonthly", intro: "$17.99", recurring: "$47.99", badged: false, original: "$39.99" },
+  { key: "sub_intro_3d", labelKey: "planLabel3d", periodKey: "period3d", recurringPattern: "recurringWeekly",  badged: true  },
+  { key: "sub_intro_7d", labelKey: "planLabel7d", periodKey: "period7d", recurringPattern: "recurringWeekly",  badged: false },
+  { key: "sub_intro_1m", labelKey: "planLabel1m", periodKey: "period1m", recurringPattern: "recurringMonthly", badged: false },
 ];
+
+type PlanDisplay = PlanStatic & {
+  intro: string;
+  recurring: string;
+  original: string;
+  perDay: string;
+};
 
 const OFFER_WINDOW_MS = 15 * 60 * 1000;
 
@@ -68,8 +74,27 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
   const [selfieSrc, setSelfieSrc] = useState<string | null>(null);
   const [remainingMs, setRemainingMs] = useState(OFFER_WINDOW_MS);
 
-  const planStatic = PLAN_STATICS.find((p) => p.key === selected)!;
-  const planLabel = t.paywall[planStatic.labelKey];
+  const currency = pickCurrency(locale);
+  const plans: PlanDisplay[] = useMemo(
+    () =>
+      PLAN_STATICS.map((p) => {
+        const meta = PLANS[p.key as StripePlanKey];
+        const introCents = meta.intro[currency];
+        // Per-day = intro / introDays, rounded to nearest minor unit. The
+        // formatter drops decimals automatically when the result is whole.
+        const perDayCents = Math.round(introCents / meta.introDays);
+        return {
+          ...p,
+          intro: formatPrice(introCents, currency, locale),
+          recurring: formatPrice(meta.recurring[currency], currency, locale),
+          original: formatPrice(meta.original[currency], currency, locale),
+          perDay: formatPrice(perDayCents, currency, locale),
+        };
+      }),
+    [currency, locale],
+  );
+
+  const planStatic = plans.find((p) => p.key === selected)!;
   const planPeriod = t.paywall[planStatic.periodKey];
   const planRecurringText = fmt(t.paywall[planStatic.recurringPattern], { price: planStatic.recurring });
 
@@ -117,7 +142,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
       const res = await fetch("/api/intro-charge", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ plan: selected, analysisId }),
+        body: JSON.stringify({ plan: selected, analysisId, locale }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         success?: boolean;
@@ -159,8 +184,8 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
     // page reads the result from sessionStorage on mount, skipping the
     // ~5–10s Stripe round-trip. Stash by plan+analysis so a plan switch
     // mid-flight doesn't crosswire.
-    void preloadCheckoutInit(selected, analysisId);
-    router.push(`/checkout?plan=${selected}&analysis=${analysisId}`);
+    void preloadCheckoutInit(selected, analysisId, locale);
+    router.push(localizeHref(`/checkout?plan=${selected}&analysis=${analysisId}`, locale));
   }
 
   const minutes = Math.floor(remainingMs / 60000);
@@ -384,7 +409,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         </p>
       </div>
       <div className="mb-4 space-y-3">
-        {PLAN_STATICS.map((p) => {
+        {plans.map((p) => {
           const active = p.key === selected;
           return (
             <button
@@ -412,19 +437,39 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
                 >
                   {active && <span className="text-xs text-white">✓</span>}
                 </div>
-                <div className="flex-1">
-                  <div className="flex items-baseline justify-between">
-                    <span className="font-display text-lg font-bold text-[var(--color-ink)]">
+                <div className="flex flex-1 items-center justify-between gap-3">
+                  <div>
+                    <div className="font-display text-lg font-bold leading-tight text-[var(--color-ink)]">
                       {t.paywall[p.labelKey]}
-                    </span>
-                    <div className="flex items-baseline gap-2">
+                    </div>
+                    <div className="mt-1 flex items-baseline gap-2">
                       <span className="text-sm text-[var(--color-ink-muted)] line-through tabular">
                         {p.original}
                       </span>
-                      <span className="font-display text-2xl font-bold text-[var(--color-orange)] tabular">
+                      <span className="font-display text-lg font-bold text-[var(--color-orange)] tabular">
                         {p.intro}
                       </span>
                     </div>
+                  </div>
+                  <div
+                    className={cn(
+                      "flex flex-shrink-0 flex-col items-center justify-center rounded-[var(--radius-input)] px-3 py-2 text-center tabular transition-colors",
+                      active
+                        ? "bg-[var(--color-orange)] text-white"
+                        : "bg-[var(--color-orange-pale)] text-[var(--color-orange)]",
+                    )}
+                  >
+                    <span className="font-display text-xl font-extrabold leading-none">
+                      {p.perDay}
+                    </span>
+                    <span
+                      className={cn(
+                        "mt-1 text-[9px] font-bold uppercase tracking-wider leading-none",
+                        active ? "text-white/90" : "text-[var(--color-ink-muted)]",
+                      )}
+                    >
+                      {t.paywall.perDay}
+                    </span>
                   </div>
                 </div>
               </div>

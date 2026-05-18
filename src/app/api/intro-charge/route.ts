@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { stripe, PLANS, priceIdFor, type PlanKey } from "@/lib/stripe";
+import {
+  stripe,
+  PLANS,
+  priceIdFor,
+  pickCurrency,
+  type PlanKey,
+} from "@/lib/stripe";
+import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { provisionIntroPayment } from "@/lib/provisioning";
 
@@ -27,15 +34,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
   }
 
-  const { plan, analysisId } = (await req.json()) as {
+  const { plan, analysisId, locale: bodyLocale } = (await req.json()) as {
     plan: PlanKey;
     analysisId?: string;
+    locale?: string;
   };
   const planMeta = PLANS[plan];
   if (!planMeta) return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
   if (!analysisId) {
     return NextResponse.json({ error: "Missing analysisId" }, { status: 400 });
   }
+
+  const locale = isLocale(bodyLocale) ? bodyLocale : DEFAULT_LOCALE;
+  const currency = pickCurrency(locale);
+  const introAmount = planMeta.intro[currency];
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -84,15 +96,16 @@ export async function POST(req: NextRequest) {
 
   const subscription = await stripe.subscriptions.create({
     customer: customer.id,
+    currency,
     items: [{ price: recurringPriceId, quantity: 1 }],
     default_payment_method: savedPmId,
     trial_period_days: planMeta.introDays,
     add_invoice_items: [
       {
         price_data: {
-          currency: "usd",
+          currency,
           product: introProductId,
-          unit_amount: planMeta.introCents,
+          unit_amount: introAmount,
         },
       },
     ],

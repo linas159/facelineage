@@ -38,6 +38,7 @@ const inflight = new Map<string, Promise<CheckoutInitCached | null>>();
 export function preloadCheckoutInit(
   plan: Plan,
   analysisId: string,
+  locale: string = "en",
 ): Promise<CheckoutInitCached | null> {
   const k = inflightKey(plan, analysisId);
   const existing = inflight.get(k);
@@ -52,7 +53,7 @@ export function preloadCheckoutInit(
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ plan, analysisId }),
+        body: JSON.stringify({ plan, analysisId, locale }),
       });
       if (!res.ok) return null;
       const data = (await res.json()) as CheckoutInitCached;

@@ -1,6 +1,13 @@
 import { after } from "next/server";
 import type Stripe from "stripe";
-import { stripe, PLANS, type PlanKey } from "@/lib/stripe";
+import {
+  stripe,
+  PLANS,
+  isCurrency,
+  formatPrice,
+  type PlanKey,
+  type Currency,
+} from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { runMainPipeline } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
@@ -149,10 +156,20 @@ export async function provisionIntroPayment(opts: {
       return;
     }
 
+    // Currency of the actual charge — the PI carries it from the
+    // subscription's currency, which we set at checkout from the user's
+    // locale. Email is en-US formatted regardless of locale (template
+    // copy is English only) — Intl.NumberFormat picks the right symbol
+    // from the currency code.
+    const currency: Currency = isCurrency(opts.pi.currency)
+      ? (opts.pi.currency as Currency)
+      : "usd";
+    const recurringAmountCents = planMeta.recurring[currency];
+
     try {
       await sendReportReadyEmail(opts.email, {
         reportUrl: `${baseUrl}/report/${opts.analysisId}`,
-        amountPaid: planMeta.introPrice,
+        amountPaid: formatPrice(opts.pi.amount, currency, "en"),
         paymentDate: new Date().toLocaleDateString("en-US", {
           year: "numeric",
           month: "long",
@@ -166,7 +183,7 @@ export async function provisionIntroPayment(opts: {
               day: "numeric",
             })
           : "the end of your trial",
-        recurringAmount: `${planMeta.recurringPrice}/${planMeta.recurringPeriod}`,
+        recurringAmount: `${formatPrice(recurringAmountCents, currency, "en")}/${planMeta.recurringPeriod}`,
       });
     } catch (err) {
       console.error(`[provisioning] email failed:`, err);

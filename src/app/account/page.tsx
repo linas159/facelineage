@@ -3,7 +3,8 @@ import { FunnelShell } from "@/components/funnel-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import { PLANS } from "@/lib/stripe";
+import { PLANS, formatPrice, pickCurrency } from "@/lib/stripe";
+import { getLocale, getDictionary } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,13 @@ export default async function AccountPage() {
         year: "numeric",
       })
     : null;
+  const locale = await getLocale();
+  const dict = await getDictionary();
+  const currency = pickCurrency(locale);
+  const planLabel = planMeta ? dict.paywall[planMeta.labelKey] : null;
+  const recurringDisplay = planMeta
+    ? formatPrice(planMeta.recurring[currency], currency, locale)
+    : null;
 
   return (
     <FunnelShell showBack backHref="/dashboard">
@@ -61,10 +69,10 @@ export default async function AccountPage() {
             {statusMeta && <Chip color={statusMeta.color}>{statusMeta.label}</Chip>}
           </div>
           <CardDescription className="mb-4">
-            {planMeta && renewsAt
-              ? `${planMeta.label} · renews ${planMeta.recurringPrice}/${planMeta.recurringPeriod} on ${renewsAt}`
-              : planMeta
-              ? planMeta.label
+            {planLabel && renewsAt && recurringDisplay
+              ? `${planLabel} · renews ${recurringDisplay}/${planMeta!.recurringPeriod} on ${renewsAt}`
+              : planLabel
+              ? planLabel
               : "No active subscription."}
           </CardDescription>
           {sub && (

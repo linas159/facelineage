@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stripe, priceIdFor, UPSELL_SKU_BY_UI_ID } from "@/lib/stripe";
+import {
+  stripe,
+  priceIdFor,
+  pickCurrency,
+  priceAmountFor,
+  UPSELL_SKU_BY_UI_ID,
+} from "@/lib/stripe";
+import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -18,9 +25,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
   }
 
-  const { upsell, analysisId } = (await req.json()) as {
+  const { upsell, analysisId, locale: bodyLocale } = (await req.json()) as {
     upsell: keyof typeof UPSELL_SKU_BY_UI_ID;
     analysisId?: string;
+    locale?: string;
   };
 
   const sku = UPSELL_SKU_BY_UI_ID[upsell];
@@ -28,6 +36,9 @@ export async function POST(req: NextRequest) {
   if (!analysisId) {
     return NextResponse.json({ error: "Missing analysisId" }, { status: 400 });
   }
+
+  const locale = isLocale(bodyLocale) ? bodyLocale : DEFAULT_LOCALE;
+  const currency = pickCurrency(locale);
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -59,16 +70,20 @@ export async function POST(req: NextRequest) {
     customerId = customer.id;
   }
 
-  // Look up the price → get its amount (we don't trust the client).
+  // Look up the price → get its amount in the requested currency. Stripe
+  // Prices created by `setup-stripe.mjs` hold all supported currencies
+  // under `currency_options`; we pick the matching amount here so we don't
+  // trust the client and so PaymentIntent.amount matches PaymentIntent.currency.
   const priceId = priceIdFor(sku);
   const price = await stripe.prices.retrieve(priceId);
-  if (!price.unit_amount) {
-    return NextResponse.json({ error: "Price has no unit_amount" }, { status: 500 });
+  const amount = priceAmountFor(price, currency);
+  if (!amount) {
+    return NextResponse.json({ error: "Price misconfigured" }, { status: 500 });
   }
 
   const pi = await stripe.paymentIntents.create({
-    amount: price.unit_amount,
-    currency: price.currency,
+    amount,
+    currency,
     customer: customerId,
     payment_method_types: ["card"],
     description: sku,
@@ -84,7 +99,7 @@ export async function POST(req: NextRequest) {
     clientSecret: pi.client_secret,
     paymentIntentId: pi.id,
     publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
-    amount: price.unit_amount,
-    currency: price.currency,
+    amount,
+    currency,
   });
 }

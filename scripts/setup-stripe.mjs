@@ -1,16 +1,19 @@
 // scripts/setup-stripe.mjs
 //
-// Creates Facelineage's Stripe products + prices.
+// Creates Facelineage's Stripe products + multi-currency prices.
 // Chained intro→recurring tiers can't be set up via the Stripe Dashboard UI;
-// this script creates them via the API.
+// this script creates them via the API. Each Price holds USD + EUR + RON
+// amounts via `currency_options` so we pass `currency` at checkout time and
+// Stripe picks the matching amount.
 //
 // USAGE:
 //   1. Put your STRIPE_SECRET_KEY into .env.local
 //   2. node --env-file=.env.local scripts/setup-stripe.mjs
 //   3. Copy the printed STRIPE_PRICE_* lines into your .env.local
 //
-// This is idempotent at the product level (uses lookup_key on prices to avoid dupes
-// across re-runs).
+// Idempotent: uses lookup_key on prices to avoid dupes across re-runs.
+// Bump the *_LOOKUP keys below to force a fresh Price (existing
+// subscriptions stay on the old Price ID — that's intentional).
 
 import Stripe from "stripe";
 
@@ -22,38 +25,57 @@ if (!key) {
 
 const stripe = new Stripe(key, { apiVersion: "2024-12-18.acacia" });
 
+// Currencies kept in sync with src/lib/stripe.ts SUPPORTED_CURRENCIES.
+// USD is the default (`unit_amount` / `currency`); the rest live under
+// `currency_options`.
+const DEFAULT_CURRENCY = "usd";
+const ALT_CURRENCIES = ["eur", "ron"];
+
 // Only the recurring prices live in Stripe's catalog. The intro fee is
-// charged via PaymentIntent at checkout time (amount sourced from PLANS in
+// charged via PaymentIntent at checkout time (amounts sourced from PLANS in
 // lib/stripe.ts), so we don't need separate Stripe prices for it.
 const SUBSCRIPTION_TIERS = [
   {
     name: "Facelineage Weekly",
-    recurringLookup: "fl_recur_week_2499",
-    recurringCents: 2499,
+    recurringLookup: "fl_recur_week_mc_v1",
     recurringInterval: "week",
-    recurringNickname: "$24.99 / week",
+    recurringNickname: "$24.99 / week (multi-currency)",
+    amounts: { usd: 2499, eur: 2499, ron: 9900 },
   },
   {
     name: "Facelineage Monthly",
-    recurringLookup: "fl_recur_month_4799",
-    recurringCents: 4799,
+    recurringLookup: "fl_recur_month_mc_v1",
     recurringInterval: "month",
-    recurringNickname: "$47.99 / month",
+    recurringNickname: "$47.99 / month (multi-currency)",
+    amounts: { usd: 4799, eur: 4799, ron: 18900 },
   },
 ];
 
 // 5 add-ons offered post-payment (report + dashboard).
 const UPSELLS = [
-  { envKey: "STRIPE_PRICE_UPSELL_PARENTS",   name: "Facelineage: What Each Parent Gave You", lookup: "fl_upsell_parents_v2",   cents: 499 },
-  { envKey: "STRIPE_PRICE_UPSELL_ETHNICITY", name: "Facelineage: Heritage Mirror",            lookup: "fl_upsell_ethnicity_v1", cents: 699 },
-  { envKey: "STRIPE_PRICE_UPSELL_AGES",      name: "Facelineage: Through The Ages",           lookup: "fl_upsell_ages_v2",      cents: 699 },
-  { envKey: "STRIPE_PRICE_UPSELL_PARTNER",   name: "Facelineage: Future Partner",             lookup: "fl_upsell_partner_v1",   cents: 699 },
-  { envKey: "STRIPE_PRICE_UPSELL_BOOK",      name: "Facelineage: Heritage Book",              lookup: "fl_upsell_book_v2",      cents: 999 },
+  { envKey: "STRIPE_PRICE_UPSELL_PARENTS",   name: "Facelineage: What Each Parent Gave You", lookup: "fl_upsell_parents_mc_v1",   amounts: { usd: 499, eur: 499, ron: 1900 } },
+  { envKey: "STRIPE_PRICE_UPSELL_ETHNICITY", name: "Facelineage: Heritage Mirror",            lookup: "fl_upsell_ethnicity_mc_v1", amounts: { usd: 699, eur: 699, ron: 2700 } },
+  { envKey: "STRIPE_PRICE_UPSELL_AGES",      name: "Facelineage: Through The Ages",           lookup: "fl_upsell_ages_mc_v1",      amounts: { usd: 699, eur: 699, ron: 2700 } },
+  { envKey: "STRIPE_PRICE_UPSELL_PARTNER",   name: "Facelineage: Future Partner",             lookup: "fl_upsell_partner_mc_v1",   amounts: { usd: 699, eur: 699, ron: 2700 } },
+  { envKey: "STRIPE_PRICE_UPSELL_BOOK",      name: "Facelineage: Heritage Book",              lookup: "fl_upsell_book_mc_v1",      amounts: { usd: 999, eur: 999, ron: 3900 } },
 ];
 
-async function findOrCreatePrice({ productName, lookup, nickname, cents, recurring }) {
+function buildCurrencyOptions(amounts) {
+  const opts = {};
+  for (const c of ALT_CURRENCIES) {
+    if (amounts[c] == null) continue;
+    opts[c] = { unit_amount: amounts[c] };
+  }
+  return opts;
+}
+
+async function findOrCreatePrice({ productName, lookup, nickname, amounts, recurring }) {
   // 1. Look for existing price by lookup_key
-  const existing = await stripe.prices.list({ lookup_keys: [lookup], expand: ["data.product"], limit: 1 });
+  const existing = await stripe.prices.list({
+    lookup_keys: [lookup],
+    expand: ["data.product", "data.currency_options"],
+    limit: 1,
+  });
   if (existing.data.length) {
     console.log(`  ↺  ${lookup}: reused ${existing.data[0].id}`);
     return existing.data[0];
@@ -67,16 +89,18 @@ async function findOrCreatePrice({ productName, lookup, nickname, cents, recurri
     console.log(`  +  product: ${product.id} (${productName})`);
   }
 
-  // 3. Create the price
+  // 3. Create the price with currency_options
   const price = await stripe.prices.create({
     product: product.id,
-    currency: "usd",
-    unit_amount: cents,
+    currency: DEFAULT_CURRENCY,
+    unit_amount: amounts[DEFAULT_CURRENCY],
+    currency_options: buildCurrencyOptions(amounts),
     nickname,
     lookup_key: lookup,
     ...(recurring ? { recurring } : {}),
   });
-  console.log(`  +  ${lookup}: ${price.id}  (${nickname})`);
+  const altSummary = ALT_CURRENCIES.map((c) => `${c}=${amounts[c]}`).join(" ");
+  console.log(`  +  ${lookup}: ${price.id}  (usd=${amounts.usd} ${altSummary})`);
   return price;
 }
 
@@ -90,11 +114,17 @@ async function main() {
       productName: tier.name,
       lookup: tier.recurringLookup,
       nickname: tier.recurringNickname,
-      cents: tier.recurringCents,
+      amounts: tier.amounts,
       recurring: { interval: tier.recurringInterval },
     });
     if (tier.recurringInterval === "week") envOut.STRIPE_PRICE_RECUR_WEEK = recurring.id;
     if (tier.recurringInterval === "month") envOut.STRIPE_PRICE_RECUR_MONTH = recurring.id;
+
+    // Also cache the product id so /api/checkout doesn't need a round-trip
+    // to resolve it for add_invoice_items.price_data.
+    const productId = typeof recurring.product === "string" ? recurring.product : recurring.product.id;
+    if (tier.recurringInterval === "week") envOut.STRIPE_PRODUCT_WEEKLY = productId;
+    if (tier.recurringInterval === "month") envOut.STRIPE_PRODUCT_MONTHLY = productId;
   }
 
   console.log("\n━━━ Upsells ━━━");
@@ -103,7 +133,7 @@ async function main() {
       productName: u.name,
       lookup: u.lookup,
       nickname: u.name,
-      cents: u.cents,
+      amounts: u.amounts,
     });
     envOut[u.envKey] = price.id;
   }

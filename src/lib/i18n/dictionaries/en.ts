@@ -256,6 +256,7 @@ export const en = {
     planLabel7d: "7-Day",
     planLabel1m: "1-Month",
     planBadgeMostPopular: "Most popular",
+    perDay: "Per day",
     chargeButton: "Charge {label} for {price}",
     chargingButton: "Charging…",
     useDifferentCard: "Use a different payment method",

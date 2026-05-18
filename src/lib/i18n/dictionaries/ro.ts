@@ -259,6 +259,7 @@ export const ro: Dictionary = {
     planLabel7d: "7 Zile",
     planLabel1m: "1 Lună",
     planBadgeMostPopular: "Cel mai popular",
+    perDay: "Pe zi",
     chargeButton: "Plătește {price} cu {label}",
     chargingButton: "Se procesează…",
     useDifferentCard: "Folosește altă metodă de plată",

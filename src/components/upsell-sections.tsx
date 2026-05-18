@@ -8,6 +8,13 @@ import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
+import {
+  UPSELL_SKU_BY_UI_ID,
+  UPSELL_ORIGINAL,
+  formatPrice,
+  pickCurrency,
+  type Currency,
+} from "@/lib/stripe";
 
 export type UpsellId =
   | "parents"
@@ -17,9 +24,10 @@ export type UpsellId =
   | "book";
 
 /**
- * Per-upsell static data — the parts that don't change per locale:
- * id, image, pricing, accent color. Text fields are resolved per render
- * from the `upsells` section of the dictionary.
+ * Per-upsell static data — the parts that don't change per locale or
+ * currency: id, image, dictionary keys, accent color. Per-locale prices
+ * are computed at render time from the Stripe Price catalog (mirrored in
+ * lib/stripe.ts via UPSELL_PRICE / UPSELL_ORIGINAL).
  */
 type UpsellStatic = {
   id: UpsellId;
@@ -27,19 +35,26 @@ type UpsellStatic = {
   subtitleKey: "parentsSubtitle" | "ethnicitySubtitle" | "agesSubtitle" | "partnerSubtitle" | "bookSubtitle";
   bodyKey: "parentsBody" | "ethnicityBody" | "agesBody" | "partnerBody" | "bookBody";
   ctaKey: "parentsCta" | "ethnicityCta" | "agesCta" | "partnerCta" | "bookCta";
-  price: string;
-  originalPrice: string;
   imageSrc: string;
   accent: string;
 };
 
 const UPSELL_STATICS: UpsellStatic[] = [
-  { id: "parents",   titleKey: "parentsTitle",   subtitleKey: "parentsSubtitle",   bodyKey: "parentsBody",   ctaKey: "parentsCta",   price: "$4.99", originalPrice: "$8.99",  imageSrc: "/upsell/parents.png",   accent: "var(--color-orange)" },
-  { id: "ethnicity", titleKey: "ethnicityTitle", subtitleKey: "ethnicitySubtitle", bodyKey: "ethnicityBody", ctaKey: "ethnicityCta", price: "$6.99", originalPrice: "$12.99", imageSrc: "/upsell/ethnicity.png", accent: "var(--color-violet)" },
-  { id: "ages",      titleKey: "agesTitle",      subtitleKey: "agesSubtitle",      bodyKey: "agesBody",      ctaKey: "agesCta",      price: "$6.99", originalPrice: "$12.99", imageSrc: "/upsell/ages.png",      accent: "var(--color-yellow)" },
-  { id: "partner",   titleKey: "partnerTitle",   subtitleKey: "partnerSubtitle",   bodyKey: "partnerBody",   ctaKey: "partnerCta",   price: "$6.99", originalPrice: "$12.99", imageSrc: "/upsell/partner.png",   accent: "var(--color-coral)" },
-  { id: "book",      titleKey: "bookTitle",      subtitleKey: "bookSubtitle",      bodyKey: "bookBody",      ctaKey: "bookCta",      price: "$9.99", originalPrice: "$17.99", imageSrc: "/upsell/book.png",      accent: "var(--color-green)" },
+  { id: "parents",   titleKey: "parentsTitle",   subtitleKey: "parentsSubtitle",   bodyKey: "parentsBody",   ctaKey: "parentsCta",   imageSrc: "/upsell/parents.png",   accent: "var(--color-orange)" },
+  { id: "ethnicity", titleKey: "ethnicityTitle", subtitleKey: "ethnicitySubtitle", bodyKey: "ethnicityBody", ctaKey: "ethnicityCta", imageSrc: "/upsell/ethnicity.png", accent: "var(--color-violet)" },
+  { id: "ages",      titleKey: "agesTitle",      subtitleKey: "agesSubtitle",      bodyKey: "agesBody",      ctaKey: "agesCta",      imageSrc: "/upsell/ages.png",      accent: "var(--color-yellow)" },
+  { id: "partner",   titleKey: "partnerTitle",   subtitleKey: "partnerSubtitle",   bodyKey: "partnerBody",   ctaKey: "partnerCta",   imageSrc: "/upsell/partner.png",   accent: "var(--color-coral)" },
+  { id: "book",      titleKey: "bookTitle",      subtitleKey: "bookSubtitle",      bodyKey: "bookBody",      ctaKey: "bookCta",      imageSrc: "/upsell/book.png",      accent: "var(--color-green)" },
 ];
+
+// Per-locale display prices (mirrors what's in Stripe + UPSELL_ORIGINAL).
+const UPSELL_PRICE: Record<UpsellId, Record<Currency, number>> = {
+  parents:   { usd: 499, eur: 499, ron: 1900 },
+  ethnicity: { usd: 699, eur: 699, ron: 2700 },
+  ages:      { usd: 699, eur: 699, ron: 2700 },
+  partner:   { usd: 699, eur: 699, ron: 2700 },
+  book:      { usd: 999, eur: 999, ron: 3900 },
+};
 
 /** Runtime upsell shape after dictionary keys are resolved. */
 export type Upsell = {
@@ -54,14 +69,23 @@ export type Upsell = {
   accent: string;
 };
 
-function resolveUpsell(s: UpsellStatic, dict: Dictionary["upsells"]): Upsell {
+function resolveUpsell(
+  s: UpsellStatic,
+  dict: Dictionary["upsells"],
+  currency: Currency,
+  locale: string,
+): Upsell {
+  const skuKey = UPSELL_SKU_BY_UI_ID[s.id];
+  const original = UPSELL_ORIGINAL[skuKey];
   return {
     id: s.id,
     title: dict[s.titleKey],
     subtitle: dict[s.subtitleKey],
     body: dict[s.bodyKey],
-    price: s.price,
-    originalPrice: s.originalPrice,
+    price: formatPrice(UPSELL_PRICE[s.id][currency], currency, locale),
+    originalPrice: original
+      ? formatPrice(original[currency], currency, locale)
+      : "",
     imageSrc: s.imageSrc,
     cta: dict[s.ctaKey],
     accent: s.accent,
@@ -178,7 +202,8 @@ export function UpsellSections({
   const [busy, setBusy] = useState<UpsellId | null>(null);
   const [purchased, setPurchased] = useState<Partial<Record<UpsellId, boolean>>>({});
   const [errors, setErrors] = useState<Partial<Record<UpsellId, string>>>({});
-  const allUpsells = UPSELL_STATICS.map((s) => resolveUpsell(s, t.upsells));
+  const currency = pickCurrency(locale);
+  const allUpsells = UPSELL_STATICS.map((s) => resolveUpsell(s, t.upsells, currency, locale));
   const list = ids ? allUpsells.filter((u) => ids.includes(u.id)) : allUpsells;
 
   async function handleAccept(id: UpsellId) {
@@ -189,7 +214,7 @@ export function UpsellSections({
     }
     setBusy(id);
     setErrors((e) => ({ ...e, [id]: undefined }));
-    const result = await chargeUpsell(id, analysisId, t);
+    const result = await chargeUpsell(id, analysisId, locale, t);
     if (result === "success") {
       setPurchased((p) => ({ ...p, [id]: true }));
       router.refresh();
@@ -355,8 +380,9 @@ export function UpsellPopupSequence({
   analysisId,
   triggerOnMount = false,
 }: UpsellPopupSequenceProps) {
-  const { t } = useI18n();
-  const all = UPSELL_STATICS.map((s) => resolveUpsell(s, t.upsells));
+  const { t, locale } = useI18n();
+  const currency = pickCurrency(locale);
+  const all = UPSELL_STATICS.map((s) => resolveUpsell(s, t.upsells, currency, locale));
   const list = ids ? all.filter((u) => ids.includes(u.id)) : all;
   const [step, setStep] = useState<number>(-1);
   const [busy, setBusy] = useState<UpsellId | null>(null);
@@ -406,7 +432,7 @@ export function UpsellPopupSequence({
     }
     const upsellRef = list.find((u) => u.id === id) ?? null;
     setBusy(id);
-    const result = await chargeUpsell(id, analysisId, t);
+    const result = await chargeUpsell(id, analysisId, locale, t);
     setBusy(null);
 
     if (result === "success") {
@@ -513,6 +539,7 @@ type ChargeResult = "success" | "checkout" | string;
 async function chargeUpsell(
   upsell: UpsellId,
   analysisId: string,
+  locale: string,
   t: Dictionary,
 ): Promise<ChargeResult> {
   let res: Response;
@@ -520,7 +547,7 @@ async function chargeUpsell(
     res = await fetch("/api/upsell-charge", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ upsell, analysisId }),
+      body: JSON.stringify({ upsell, analysisId, locale }),
     });
   } catch {
     return t.upsells.networkError;

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import type Stripe from "stripe";
-import { stripe, priceIdFor, UPSELL_SKU_BY_UI_ID } from "@/lib/stripe";
+import {
+  stripe,
+  priceIdFor,
+  pickCurrency,
+  priceAmountFor,
+  UPSELL_SKU_BY_UI_ID,
+} from "@/lib/stripe";
+import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { recordPurchase } from "@/lib/purchases";
 import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
@@ -27,9 +34,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
   }
 
-  const { upsell, analysisId } = (await req.json()) as {
+  const { upsell, analysisId, locale: bodyLocale } = (await req.json()) as {
     upsell: keyof typeof UPSELL_SKU_BY_UI_ID;
     analysisId?: string;
+    locale?: string;
   };
 
   const sku = UPSELL_SKU_BY_UI_ID[upsell];
@@ -37,6 +45,9 @@ export async function POST(req: NextRequest) {
   if (!analysisId) {
     return NextResponse.json({ error: "Missing analysisId" }, { status: 400 });
   }
+
+  const locale = isLocale(bodyLocale) ? bodyLocale : DEFAULT_LOCALE;
+  const currency = pickCurrency(locale);
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -114,14 +125,15 @@ export async function POST(req: NextRequest) {
   }
 
   const price = await stripe.prices.retrieve(priceIdFor(sku));
-  if (!price.unit_amount) {
+  const amount = priceAmountFor(price, currency);
+  if (!amount) {
     return NextResponse.json({ error: "Price misconfigured" }, { status: 500 });
   }
 
   try {
     const pi = await stripe.paymentIntents.create({
-      amount: price.unit_amount,
-      currency: price.currency,
+      amount,
+      currency,
       customer: customer.id,
       payment_method: defaultPm,
       off_session: true,
