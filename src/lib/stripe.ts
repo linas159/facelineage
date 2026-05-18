@@ -62,13 +62,13 @@ export function isCurrency(s: string | null | undefined): s is Currency {
 }
 
 /** Map locale → checkout currency. New locales: add a row here.
- * Note: Romania uses EUR here (not RON) because PayPal + Link don't
- * support RON. Card + Apple/Google Pay work in any currency, but losing
- * PayPal/Link narrows checkout options too much. EUR is widely accepted
- * in Romania for digital products. */
+ * Note for RON: PayPal + Link don't support RON, so RO users only get
+ * Card + Apple/Google Pay. The PM filter in /api/checkout handles that
+ * automatically by currency. Card-dominant market — net better for
+ * conversion per local advice. */
 const LOCALE_TO_CURRENCY: Record<string, Currency> = {
   en: "usd",
-  ro: "eur",
+  ro: "ron",
 };
 
 export function pickCurrency(locale: string | null | undefined): Currency {
@@ -132,7 +132,7 @@ export const PLANS = {
     introPeriod: "3 days",
     recurringInterval: "week" as const,
     recurringPeriod: "week",
-    intro: { usd: 195, eur: 195, ron: 750 } satisfies Amounts,
+    intro: { usd: 195, eur: 195, ron: 700 } satisfies Amounts,
     recurring: { usd: 2499, eur: 2499, ron: 9900 } satisfies Amounts,
     original: { usd: 995, eur: 995, ron: 3900 } satisfies Amounts,
   },
