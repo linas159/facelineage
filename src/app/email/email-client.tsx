@@ -5,8 +5,23 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, Chip } from "@/components/ui/card";
 import { useI18n, localizeHref } from "@/lib/i18n/client";
+import { fbqTrack } from "@/lib/meta/pixel";
+import { capture, identify } from "@/lib/posthog/client";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Mirrors metaEventId.lead() in /lib/meta/capi.ts — keep in sync. */
+function leadEventId(analysisId: string) {
+  return `lead_${analysisId}`;
+}
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie
+    .split(/;\s*/)
+    .find((part) => part.startsWith(`${name}=`));
+  return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
+}
 
 export function EmailClient({ initialEmail }: { initialEmail: string }) {
   const router = useRouter();
@@ -25,6 +40,19 @@ export function EmailClient({ initialEmail }: { initialEmail: string }) {
     }
     setBusy(true);
     try {
+      // Read analysisId from the pre-auth cookie so the browser Pixel can
+      // use the same deterministic event_id the server will use for CAPI.
+      const analysisId = readCookie("fl_pending_analysis_id");
+      if (analysisId) {
+        fbqTrack("Lead", { content_name: "email_capture" }, leadEventId(analysisId));
+      } else {
+        fbqTrack("Lead", { content_name: "email_capture" });
+      }
+      // PostHog — identify by email so all prior anonymous events get
+      // stitched to this person.
+      identify(trimmed, { email: trimmed });
+      capture("email_submitted", { analysis_id: analysisId ?? null });
+
       const res = await fetch("/api/save-email", {
         method: "POST",
         headers: { "content-type": "application/json" },

@@ -10,6 +10,13 @@ import { cn } from "@/lib/utils";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
 import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
 import { PLANS, formatPrice, pickCurrency, type PlanKey as StripePlanKey } from "@/lib/stripe";
+import { fbqTrack } from "@/lib/meta/pixel";
+import { capture } from "@/lib/posthog/client";
+
+/** Mirrors metaEventId.initiateCheckout() in /lib/meta/capi.ts. */
+function initiateCheckoutEventId(analysisId: string, plan: string) {
+  return `initiate_checkout_${analysisId}_${plan}`;
+}
 
 type PlanKey = "sub_intro_3d" | "sub_intro_7d" | "sub_intro_1m";
 
@@ -138,6 +145,11 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
   async function chargeSavedPm() {
     setBusy(true);
     setChargeError(null);
+    capture("paywall_one_tap_charge_attempted", {
+      plan: selected,
+      analysis_id: analysisId,
+      pm_kind: savedPm?.kind ?? null,
+    });
     try {
       const res = await fetch("/api/intro-charge", {
         method: "POST",
@@ -180,6 +192,29 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
 
   function startCheckout() {
     setBusy(true);
+    // Browser Pixel — pairs with the CAPI InitiateCheckout fired by
+    // /api/checkout (same deterministic event_id) for dedup.
+    const introCents = PLANS[selected as StripePlanKey].intro[currency];
+    capture("paywall_unlock_clicked", {
+      plan: selected,
+      analysis_id: analysisId,
+      currency,
+      intro_cents: introCents,
+      has_saved_pm: !!savedPm,
+    });
+    fbqTrack(
+      "InitiateCheckout",
+      {
+        currency: currency.toUpperCase(),
+        value: introCents / 100,
+        content_name: selected,
+        content_category: "subscription_intro",
+        content_ids: [selected],
+        content_type: "product",
+        num_items: 1,
+      },
+      initiateCheckoutEventId(analysisId, selected),
+    );
     // Fire the checkout-init request *before* navigating. The /checkout
     // page reads the result from sessionStorage on mount, skipping the
     // ~5–10s Stripe round-trip. Stash by plan+analysis so a plan switch
@@ -415,7 +450,10 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
             <button
               key={p.key}
               type="button"
-              onClick={() => setSelected(p.key)}
+              onClick={() => {
+                capture("paywall_plan_selected", { plan: p.key, analysis_id: analysisId });
+                setSelected(p.key);
+              }}
               className={cn(
                 "relative w-full rounded-[var(--radius-card)] bg-white p-4 text-left shadow-[var(--shadow-card)] transition-all",
                 active

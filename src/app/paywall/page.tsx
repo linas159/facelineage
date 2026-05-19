@@ -5,6 +5,7 @@ import { FunnelShell } from "@/components/funnel-shell";
 import { PaywallClient, type SavedPaymentMethod } from "./paywall-client";
 import { createClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe";
+import { ViewContentBeacon } from "@/lib/meta/view-content";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,11 @@ export default async function PaywallPage({
 
   return (
     <FunnelShell>
+      <ViewContentBeacon
+        contentName="paywall"
+        contentCategory="funnel"
+        contentIds={[analysisId]}
+      />
       <PaywallClient analysisId={analysisId} savedPm={savedPm} />
     </FunnelShell>
   );

@@ -14,6 +14,7 @@ import {
 import { SelfieCamera, isCameraSupported } from "@/components/selfie-camera";
 import { uploadPhoto } from "@/lib/actions/upload-photo";
 import { useI18n } from "@/lib/i18n/client";
+import { capture } from "@/lib/posthog/client";
 
 export function CaptureView() {
   const router = useRouter();
@@ -31,6 +32,7 @@ export function CaptureView() {
     setError(null);
     setFile(f);
     setPreview(URL.createObjectURL(f));
+    capture("capture_photo_selected", { source: cameraOpen ? "camera" : "library" });
   }
 
   function openCamera() {
@@ -45,6 +47,7 @@ export function CaptureView() {
     if (!file) return;
     setUploading(true);
     setError(null);
+    capture("capture_photo_confirmed");
 
     // Stash the photo as a data URL so the next page (/analyzing) can render
     // it inside the pulsating oval without a Supabase round-trip.
@@ -95,6 +98,7 @@ export function CaptureView() {
     setPreview(null);
     setFile(null);
     setError(null);
+    capture("capture_photo_retake");
     router.refresh();
   }
 

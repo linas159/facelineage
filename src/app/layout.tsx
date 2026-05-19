@@ -1,8 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { Outfit, Signika } from "next/font/google";
+import { Suspense } from "react";
 import "./globals.css";
 import { getDictionary, getLocale } from "@/lib/i18n/server";
 import { I18nProvider } from "@/lib/i18n/client";
+import { PixelLoader } from "@/lib/meta/pixel-loader";
+import { PostHogProvider } from "@/lib/posthog/provider";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -54,6 +57,10 @@ export default async function RootLayout({
         <I18nProvider locale={locale} dict={dict}>
           {children}
         </I18nProvider>
+        <Suspense fallback={null}>
+          <PixelLoader />
+          <PostHogProvider />
+        </Suspense>
       </body>
     </html>
   );

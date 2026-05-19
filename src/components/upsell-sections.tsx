@@ -15,6 +15,7 @@ import {
   pickCurrency,
   type Currency,
 } from "@/lib/stripe";
+import { capture } from "@/lib/posthog/client";
 
 export type UpsellId =
   | "parents"
@@ -212,10 +213,12 @@ export function UpsellSections({
       console.warn("UpsellSections: no analysisId; cannot charge");
       return;
     }
+    capture("upsell_accepted", { upsell_id: id, analysis_id: analysisId });
     setBusy(id);
     setErrors((e) => ({ ...e, [id]: undefined }));
     const result = await chargeUpsell(id, analysisId, locale, t);
     if (result === "success") {
+      capture("upsell_purchase_success", { upsell_id: id, analysis_id: analysisId });
       setPurchased((p) => ({ ...p, [id]: true }));
       router.refresh();
     } else if (result === "checkout") {
@@ -401,9 +404,20 @@ export function UpsellPopupSequence({
     if (allDoneFired.current) return;
     if (step >= 0 && step >= list.length) {
       allDoneFired.current = true;
+      capture("upsell_sequence_completed", { analysis_id: analysisId ?? null, count: list.length });
       onAllDone?.();
     }
-  }, [step, list.length, onAllDone]);
+  }, [step, list.length, onAllDone, analysisId]);
+
+  // Whenever a new upsell modal becomes the current step, log it as "viewed".
+  useEffect(() => {
+    if (step < 0 || step >= list.length) return;
+    capture("upsell_viewed", {
+      upsell_id: list[step].id,
+      step_index: step,
+      analysis_id: analysisId ?? null,
+    });
+  }, [step, list, analysisId]);
 
   useEffect(() => {
     if (triggerOnMount) {
@@ -446,12 +460,14 @@ export function UpsellPopupSequence({
       setStep((s) => s + 1);
       return;
     }
+    capture("upsell_popup_accepted", { upsell_id: id, step_index: step, analysis_id: analysisId });
     const upsellRef = list.find((u) => u.id === id) ?? null;
     setBusy(id);
     const result = await chargeUpsell(id, analysisId, locale, t);
     setBusy(null);
 
     if (result === "success") {
+      capture("upsell_popup_purchase_success", { upsell_id: id, analysis_id: analysisId });
       setConfirmedUpsell(upsellRef);
       // Auto-advance after 5s if the user doesn't tap Continue first.
       setTimeout(() => {
@@ -468,6 +484,14 @@ export function UpsellPopupSequence({
   }
 
   function handleDecline() {
+    const upsell = step >= 0 && step < list.length ? list[step] : null;
+    if (upsell) {
+      capture("upsell_popup_declined", {
+        upsell_id: upsell.id,
+        step_index: step,
+        analysis_id: analysisId ?? null,
+      });
+    }
     setStep((s) => s + 1);
   }
 

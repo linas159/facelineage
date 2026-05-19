@@ -12,6 +12,7 @@ import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { recordPurchase } from "@/lib/purchases";
 import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
+import { metaEventId, readRequestContext, sendMetaEvent } from "@/lib/meta/capi";
 
 export const maxDuration = 300;
 
@@ -135,6 +136,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Price misconfigured" }, { status: 500 });
   }
 
+  // Capture Pixel context now so both the immediate CAPI Purchase and the
+  // webhook's parallel CAPI fire have fbp/fbc/ip/ua available.
+  const ctx = readRequestContext({
+    headers: req.headers,
+    url: req.headers.get("referer") ?? undefined,
+  });
+  const piMetadata: Record<string, string> = {
+    kind: "upsell",
+    product_sku: sku,
+    analysis_id: analysisId,
+    supabase_user_id: user.id,
+  };
+  if (ctx.fbp) piMetadata.meta_fbp = ctx.fbp;
+  if (ctx.fbc) piMetadata.meta_fbc = ctx.fbc;
+  if (ctx.userAgent) piMetadata.meta_ua = ctx.userAgent.slice(0, 500);
+  if (ctx.ipAddress) piMetadata.meta_ip = ctx.ipAddress;
+
   try {
     const pi = await stripe.paymentIntents.create({
       amount,
@@ -144,12 +162,7 @@ export async function POST(req: NextRequest) {
       off_session: true,
       confirm: true,
       description: sku,
-      metadata: {
-        kind: "upsell",
-        product_sku: sku,
-        analysis_id: analysisId,
-        supabase_user_id: user.id,
-      },
+      metadata: piMetadata,
     });
 
     if (pi.status === "succeeded") {
@@ -182,6 +195,31 @@ export async function POST(req: NextRequest) {
           }
         });
       }
+      // CAPI Purchase — pairs with the browser Pixel fired on the
+      // upsell-popup confirmation. Meta dedupes the webhook's parallel
+      // fire of this same event_id.
+      void sendMetaEvent({
+        eventName: "Purchase",
+        eventId: metaEventId.upsellPurchase(pi.id),
+        eventSourceUrl: ctx.eventSourceUrl,
+        userData: {
+          email: user.email ?? undefined,
+          externalId: user.id,
+          ipAddress: ctx.ipAddress,
+          userAgent: ctx.userAgent,
+          fbp: ctx.fbp,
+          fbc: ctx.fbc,
+        },
+        customData: {
+          currency: pi.currency.toUpperCase(),
+          value: (pi.amount ?? 0) / 100,
+          contentName: sku,
+          contentCategory: "upsell",
+          contentIds: [sku],
+          contentType: "product",
+          numItems: 1,
+        },
+      });
       return NextResponse.json({ success: true });
     }
     if (pi.status === "requires_action") {

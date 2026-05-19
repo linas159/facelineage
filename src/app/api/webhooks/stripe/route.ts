@@ -7,6 +7,7 @@ import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
 import { provisionIntroPayment } from "@/lib/provisioning";
 import { getOrCreateAuthUser } from "@/lib/auth-user";
+import { metaEventId, sendMetaEvent } from "@/lib/meta/capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -294,6 +295,44 @@ async function handleUpsellPaid(
     console.error("Failed to record upsell purchase for PI:", pi.id);
     return;
   }
+
+  // CAPI Purchase for the upsell. Reads fbp/fbc/ua/ip stashed on the PI
+  // metadata by /api/upsell-charge. If the same event was also fired from
+  // /api/upsell-charge, Meta dedupes via event_id.
+  let email: string | undefined;
+  try {
+    const cust = pi.customer
+      ? await stripe.customers.retrieve(
+          typeof pi.customer === "string" ? pi.customer : pi.customer.id,
+        )
+      : null;
+    if (cust && !("deleted" in cust && cust.deleted)) {
+      email = (cust as Stripe.Customer).email ?? undefined;
+    }
+  } catch {
+    // ignore — fbp/fbc/ip/ua + externalId still give a decent match
+  }
+  void sendMetaEvent({
+    eventName: "Purchase",
+    eventId: metaEventId.upsellPurchase(pi.id),
+    userData: {
+      email,
+      externalId: userId,
+      fbp: md.meta_fbp,
+      fbc: md.meta_fbc,
+      ipAddress: md.meta_ip,
+      userAgent: md.meta_ua,
+    },
+    customData: {
+      currency: pi.currency.toUpperCase(),
+      value: (pi.amount ?? 0) / 100,
+      contentName: sku,
+      contentCategory: "upsell",
+      contentIds: [sku],
+      contentType: "product",
+      numItems: 1,
+    },
+  });
 
   console.log(`Firing upsell pipeline: sku=${sku} analysis=${analysisId} purchase=${purchaseId}`);
   after(async () => {

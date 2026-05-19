@@ -10,6 +10,7 @@ import {
 import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { createServiceClient } from "@/lib/supabase/server";
 import { localized } from "@/lib/i18n/server";
+import { metaEventId, readRequestContext, sendMetaEvent } from "@/lib/meta/capi";
 
 /**
  * POST /api/checkout
@@ -94,11 +95,25 @@ export async function POST(req: NextRequest) {
         : (recurringPrice.product as Stripe.Product).id;
   }
 
-  const baseMetadata = {
-    kind: "intro_fee" as const,
+  // Capture Pixel cookies now so the Stripe webhook (which fires the
+  // Purchase event server-to-server with no browser cookies of its own)
+  // can pass them to CAPI for high match quality.
+  const ctxEarly = readRequestContext({
+    headers: req.headers,
+    url: req.headers.get("referer") ?? undefined,
+  });
+  const baseMetadata: Record<string, string> = {
+    kind: "intro_fee",
     plan,
     analysis_id: analysisId,
   };
+  if (ctxEarly.fbp) baseMetadata.meta_fbp = ctxEarly.fbp;
+  if (ctxEarly.fbc) baseMetadata.meta_fbc = ctxEarly.fbc;
+  if (ctxEarly.userAgent) {
+    // Stripe metadata values are capped at 500 chars; UAs occasionally exceed.
+    baseMetadata.meta_ua = ctxEarly.userAgent.slice(0, 500);
+  }
+  if (ctxEarly.ipAddress) baseMetadata.meta_ip = ctxEarly.ipAddress;
 
   const baseSubParams: Omit<Stripe.SubscriptionCreateParams, "payment_settings" | "metadata"> = {
     customer: customer.id,
@@ -169,6 +184,32 @@ export async function POST(req: NextRequest) {
   // post-payment pages (payment-complete, generating, popups) render in
   // the default locale even when the user came from `/ro/...`.
   const returnPath = localized(`/payment-complete?analysis=${analysisId}`, locale);
+
+  // CAPI InitiateCheckout — pairs with the browser Pixel fired by the
+  // paywall (same deterministic event_id). Value is the intro fee, since
+  // that's the amount the user is being asked to pay right now.
+  void sendMetaEvent({
+    eventName: "InitiateCheckout",
+    eventId: metaEventId.initiateCheckout(analysisId, plan),
+    eventSourceUrl: ctxEarly.eventSourceUrl,
+    userData: {
+      email: analysis.email ?? undefined,
+      externalId: analysisId,
+      ipAddress: ctxEarly.ipAddress,
+      userAgent: ctxEarly.userAgent,
+      fbp: ctxEarly.fbp,
+      fbc: ctxEarly.fbc,
+    },
+    customData: {
+      currency,
+      value: introAmount / 100,
+      contentName: plan,
+      contentCategory: "subscription_intro",
+      contentIds: [plan],
+      contentType: "product",
+      numItems: 1,
+    },
+  });
 
   return NextResponse.json({
     walletsClientSecret: walletsPI.client_secret,

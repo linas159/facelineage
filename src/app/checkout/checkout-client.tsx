@@ -16,6 +16,7 @@ import { PLANS, currencySupportsPayPal, type PlanKey } from "@/lib/stripe";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
 import { PayPalButton } from "@/components/paypal-button";
 import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
+import { capture } from "@/lib/posthog/client";
 
 type Mode = "intro" | "upsell";
 type UpsellId = "parents" | "ethnicity" | "ages" | "partner" | "book";
@@ -293,6 +294,7 @@ function ExpressSection({ redirectTarget }: { redirectTarget: string }) {
       }}
       onConfirm={async () => {
         if (!stripe || !elements) return;
+        capture("checkout_wallet_pay_clicked");
         await stripe.confirmPayment({
           elements,
           confirmParams: { return_url: redirectTarget },
@@ -345,6 +347,7 @@ function CardSection({
     if (!stripe || !elements) return;
     setBusy(true);
     setError(null);
+    capture("checkout_card_pay_clicked", { currency, amount_cents: amount });
     const { error: err } = await stripe.confirmPayment({
       elements,
       confirmParams: {
@@ -371,6 +374,7 @@ function CardSection({
       },
     });
     if (err) {
+      capture("checkout_card_pay_failed", { message: err.message ?? null, code: err.code ?? null });
       setError(err.message ?? "Payment failed");
       setBusy(false);
     }

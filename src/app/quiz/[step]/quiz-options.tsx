@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { capture } from "@/lib/posthog/client";
 
 type Option = {
   label: string;
@@ -54,6 +55,7 @@ export function QuizOptions({ questionKey, options, nextHref, prefetchImages }: 
         if (tz) sessionStorage.setItem("fl_timezone", tz);
       }
     } catch {}
+    capture("quiz_step_answered", { question_key: questionKey, answer: label });
     router.push(nextHref);
   }
 

@@ -9,6 +9,7 @@ import { ColoredWorldMap } from "@/components/report/colored-world-map";
 import { HeritageMirror } from "@/components/landing/heritage-mirror";
 import { REGIONS } from "@/lib/report-data";
 import { getDictionary, getLocale, localized } from "@/lib/i18n/server";
+import { ViewContentBeacon } from "@/lib/meta/view-content";
 
 const SAMPLE_MAP_PAINT = REGIONS.flatMap((r) =>
   r.countries.map((c) => ({ iso2: c.iso2, color: r.color })),
@@ -20,6 +21,10 @@ export default async function LandingPage() {
   const l = (href: string) => localized(href, locale);
   return (
     <main className="bg-[var(--color-bg-base)]">
+      <ViewContentBeacon
+        contentName="landing"
+        contentCategory="marketing"
+      />
       {/* ───────────────── HERO — tight stack, minimal top/bottom padding ─────────────────
           Naturally sized (no 100dvh stretch), so the next section starts right after. */}
       <section className="relative">
