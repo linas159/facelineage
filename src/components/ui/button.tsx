@@ -24,7 +24,10 @@ const buttonVariants = cva(
         md: "h-12 px-6 text-base rounded-[var(--radius-pill)]",
         lg: "h-14 px-8 text-base rounded-[var(--radius-pill)]",
         xl: "h-16 px-10 text-lg rounded-[var(--radius-pill)]",
-        block: "h-14 w-full text-base rounded-[var(--radius-pill)]",
+        // Horizontal padding keeps long localized labels (e.g. Romanian price
+        // strings ending in "RON/zi") from bumping right up against the pill
+        // edges.
+        block: "h-14 w-full px-4 text-base rounded-[var(--radius-pill)]",
       },
     },
     defaultVariants: { variant: "primary", size: "md" },

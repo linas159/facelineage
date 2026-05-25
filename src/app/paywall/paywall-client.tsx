@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Card, Chip } from "@/components/ui/card";
 import { TestimonialsSection } from "@/components/testimonials";
 import { Illustration } from "@/components/illustration";
+import { PaymentTrustStrip } from "@/components/paywall/payment-trust-strip";
+import { FAQAccordion } from "@/components/paywall/faq-accordion";
 import { cn } from "@/lib/utils";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
 import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
@@ -42,9 +44,11 @@ type PlanDisplay = PlanStatic & {
   recurring: string;
   original: string;
   perDay: string;
+  // Display savings vs the original — used to power "Save X%" callouts.
+  savingsPct: number;
 };
 
-const OFFER_WINDOW_MS = 15 * 60 * 1000;
+const OFFER_WINDOW_MS = 5 * 60 * 1000;
 
 // Image paths for every illustrated slot on the page. Drop the asset at the
 // path shown — see the response message for what each picture should depict.
@@ -87,19 +91,36 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
       PLAN_STATICS.map((p) => {
         const meta = PLANS[p.key as StripePlanKey];
         const introCents = meta.intro[currency];
+        const originalCents = meta.original[currency];
         // Per-day = intro / introDays, rounded to nearest minor unit. The
         // formatter drops decimals automatically when the result is whole.
         const perDayCents = Math.round(introCents / meta.introDays);
+        const savingsPct =
+          originalCents > 0
+            ? Math.round(((originalCents - introCents) / originalCents) * 100)
+            : 0;
         return {
           ...p,
           intro: formatPrice(introCents, currency, locale),
           recurring: formatPrice(meta.recurring[currency], currency, locale),
-          original: formatPrice(meta.original[currency], currency, locale),
+          original: formatPrice(originalCents, currency, locale),
           perDay: formatPrice(perDayCents, currency, locale),
+          savingsPct,
         };
       }),
     [currency, locale],
   );
+
+  // Lowest per-day across all plans — used on the hero "from $X/day" CTA.
+  const lowestPerDay = useMemo(() => {
+    let bestCents = Infinity;
+    for (const p of PLAN_STATICS) {
+      const meta = PLANS[p.key as StripePlanKey];
+      const perDayCents = Math.round(meta.intro[currency] / meta.introDays);
+      if (perDayCents < bestCents) bestCents = perDayCents;
+    }
+    return formatPrice(bestCents === Infinity ? 0 : bestCents, currency, locale);
+  }, [currency, locale]);
 
   const planStatic = plans.find((p) => p.key === selected)!;
   const planPeriod = t.paywall[planStatic.periodKey];
@@ -157,33 +178,49 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         body: JSON.stringify({ plan: selected, analysisId, locale }),
       });
       const data = (await res.json().catch(() => ({}))) as {
-        success?: boolean;
         requiresCheckout?: boolean;
-        requiresAction?: boolean;
         clientSecret?: string;
         publishableKey?: string;
+        subscriptionId?: string;
         error?: string;
       };
-      if (data.success) {
-        router.push(`/report/${analysisId}`);
-        return;
-      }
-      if (data.requiresAction && data.clientSecret && data.publishableKey) {
-        // 3DS challenge — Stripe.js handles the popup.
-        const { loadStripe } = await import("@stripe/stripe-js");
-        const stripe = await loadStripe(data.publishableKey);
-        if (!stripe) throw new Error("Could not load Stripe.js");
-        const result = await stripe.handleNextAction({ clientSecret: data.clientSecret });
-        if (result.error) throw new Error(result.error.message ?? "Authentication failed");
-        router.push(`/report/${analysisId}`);
-        return;
-      }
       if (data.requiresCheckout) {
         // Fallback — saved PM not usable, go to full checkout.
         router.push(`/checkout?plan=${selected}&analysis=${analysisId}`);
         return;
       }
-      throw new Error(data.error ?? "Charge failed");
+      if (!data.clientSecret || !data.publishableKey || !data.subscriptionId) {
+        throw new Error(data.error ?? "Charge failed");
+      }
+
+      // On-session confirm — Stripe.js triggers the 3DS modal when the bank
+      // requires SCA (every EU card), otherwise confirms silently. The saved
+      // card is reused either way (no re-entering).
+      const { loadStripe } = await import("@stripe/stripe-js");
+      const stripe = await loadStripe(data.publishableKey);
+      if (!stripe) throw new Error("Could not load Stripe.js");
+      const confirm = await stripe.confirmPayment({
+        clientSecret: data.clientSecret,
+        confirmParams: { return_url: window.location.href },
+        redirect: "if_required",
+      });
+      if (confirm.error) {
+        throw new Error(confirm.error.message ?? "Payment failed");
+      }
+      if (confirm.paymentIntent?.status !== "succeeded") {
+        throw new Error("Payment failed");
+      }
+
+      // Run provisioning server-side before redirecting so /report sees the
+      // analysis as paid. Idempotent with the Stripe webhook.
+      await fetch("/api/intro-finalize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ subscriptionId: data.subscriptionId }),
+      }).catch(() => { /* webhook is the safety net */ });
+
+      router.push(`/report/${analysisId}`);
+      return;
     } catch (err) {
       setChargeError(err instanceof Error ? err.message : "Charge failed");
       setBusy(false);
@@ -227,6 +264,83 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
   const seconds = Math.floor((remainingMs % 60000) / 1000);
   const expired = remainingMs <= 0;
   const timeStr = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+
+  function renderPlansBlock() {
+    return (
+      <div className="mb-4 space-y-3">
+        {plans.map((p) => {
+          const active = p.key === selected;
+          return (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => {
+                capture("paywall_plan_selected", { plan: p.key, analysis_id: analysisId });
+                setSelected(p.key);
+              }}
+              className={cn(
+                "relative w-full rounded-[var(--radius-card)] bg-white p-4 text-left shadow-[var(--shadow-card)] transition-all",
+                active
+                  ? "ring-3 ring-[var(--color-orange)] -translate-y-0.5"
+                  : "ring-1 ring-[var(--color-line)] opacity-90 hover:opacity-100",
+              )}
+            >
+              {p.badged && (
+                <span className="absolute -top-2.5 left-4 rounded-full bg-[var(--color-orange)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                  {fmt(t.paywall.planBadgeMostPopularSave, { percent: p.savingsPct })}
+                </span>
+              )}
+              <div className="flex items-center gap-3">
+                <div
+                  className={cn(
+                    "flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2",
+                    active ? "border-[var(--color-orange)] bg-[var(--color-orange)]" : "border-[var(--color-line-strong)] bg-white",
+                  )}
+                >
+                  {active && <span className="text-xs text-white">✓</span>}
+                </div>
+                <div className="flex flex-1 items-center justify-between gap-3">
+                  <div>
+                    <div className="font-display text-lg font-bold leading-tight text-[var(--color-ink)]">
+                      {t.paywall[p.labelKey]}
+                    </div>
+                    <div className="mt-1 flex items-baseline gap-2">
+                      <span className="text-sm text-[var(--color-ink-muted)] line-through tabular">
+                        {p.original}
+                      </span>
+                      <span className="font-display text-lg font-bold text-[var(--color-orange)] tabular">
+                        {p.intro}
+                      </span>
+                    </div>
+                  </div>
+                  <div
+                    className={cn(
+                      "flex flex-shrink-0 flex-col items-center justify-center rounded-[var(--radius-input)] px-3 py-2 text-center tabular transition-colors",
+                      active
+                        ? "bg-[var(--color-orange)] text-white"
+                        : "bg-[var(--color-orange-pale)] text-[var(--color-orange)]",
+                    )}
+                  >
+                    <span className="font-display text-xl font-extrabold leading-none">
+                      {p.perDay}
+                    </span>
+                    <span
+                      className={cn(
+                        "mt-1 text-[9px] font-bold uppercase tracking-wider leading-none",
+                        active ? "text-white/90" : "text-[var(--color-ink-muted)]",
+                      )}
+                    >
+                      {t.paywall.perDay}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   const REPORT_FEATURES: { title: string; desc: string; src: string }[] = [
     { title: t.paywall.feat1Title, desc: t.paywall.feat1Desc, src: "/quiz/q2-globe.png" },
@@ -283,11 +397,21 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         </div>
         <Chip color="green" className="mb-3">{t.paywall.statusReady}</Chip>
         <h1 className="text-balance">{t.paywall.mainHeadline}</h1>
-        <p className="mx-auto mt-2 mb-5 max-w-sm text-sm text-[var(--color-ink-soft)]">
+        <p className="mx-auto mt-2 mb-3 max-w-sm text-sm text-[var(--color-ink-soft)]">
           {t.paywall.mainSubhead}
         </p>
+        <div className="mb-5 flex flex-wrap items-center justify-center gap-1.5">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[11px] font-bold text-[var(--color-orange)] shadow-[var(--shadow-chip)]">
+            <span aria-hidden>🌍</span>
+            {t.paywall.heroStatRegions}
+          </span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[11px] font-bold text-[var(--color-violet)] shadow-[var(--shadow-chip)]">
+            <span aria-hidden>🧬</span>
+            {t.paywall.heroStatGenerations}
+          </span>
+        </div>
         <Button size="block" onClick={scrollToPricing} className="mx-auto max-w-xs">
-          {t.paywall.unlockCta}
+          {fmt(t.paywall.unlockCtaFromPerDay, { price: lowestPerDay })}
         </Button>
       </div>
 
@@ -315,13 +439,14 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
           style={{ filter: "blur(6px)" }}
         >
           {[
-            [t.paywall.sampleRegion1, "72%", "var(--color-orange)"],
-            [t.paywall.sampleRegion2, "14%", "var(--color-green)"],
-            [t.paywall.sampleRegion3, "8%", "var(--color-yellow)"],
-            [t.paywall.sampleRegion4, "6%", "var(--color-violet)"],
-          ].map(([region, pct, color]) => (
-            <div key={region} className="flex items-center gap-3">
-              <span className="w-32 text-sm font-semibold text-[var(--color-ink)]">
+            [t.paywall.sampleRegion1, "72%", "var(--color-orange)", "🇸🇪"],
+            [t.paywall.sampleRegion2, "14%", "var(--color-green)", "🇪🇸"],
+            [t.paywall.sampleRegion3, "8%", "var(--color-yellow)", "🇮🇹"],
+            [t.paywall.sampleRegion4, "6%", "var(--color-violet)", "🇳🇬"],
+          ].map(([region, pct, color, flag]) => (
+            <div key={region} className="flex items-center gap-2.5">
+              <span className="text-xl leading-none" aria-hidden>{flag}</span>
+              <span className="w-28 text-sm font-semibold text-[var(--color-ink)]">
                 {region}
               </span>
               <div className="h-2 flex-1 overflow-hidden rounded-full bg-[var(--color-line)]">
@@ -443,78 +568,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
           {t.paywall.pickAccessLabel}
         </p>
       </div>
-      <div className="mb-4 space-y-3">
-        {plans.map((p) => {
-          const active = p.key === selected;
-          return (
-            <button
-              key={p.key}
-              type="button"
-              onClick={() => {
-                capture("paywall_plan_selected", { plan: p.key, analysis_id: analysisId });
-                setSelected(p.key);
-              }}
-              className={cn(
-                "relative w-full rounded-[var(--radius-card)] bg-white p-4 text-left shadow-[var(--shadow-card)] transition-all",
-                active
-                  ? "ring-3 ring-[var(--color-orange)] -translate-y-0.5"
-                  : "ring-1 ring-[var(--color-line)] opacity-90 hover:opacity-100",
-              )}
-            >
-              {p.badged && (
-                <span className="absolute -top-2.5 left-4 rounded-full bg-[var(--color-orange)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                  {t.paywall.planBadgeMostPopular}
-                </span>
-              )}
-              <div className="flex items-center gap-3">
-                <div
-                  className={cn(
-                    "flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2",
-                    active ? "border-[var(--color-orange)] bg-[var(--color-orange)]" : "border-[var(--color-line-strong)] bg-white",
-                  )}
-                >
-                  {active && <span className="text-xs text-white">✓</span>}
-                </div>
-                <div className="flex flex-1 items-center justify-between gap-3">
-                  <div>
-                    <div className="font-display text-lg font-bold leading-tight text-[var(--color-ink)]">
-                      {t.paywall[p.labelKey]}
-                    </div>
-                    <div className="mt-1 flex items-baseline gap-2">
-                      <span className="text-sm text-[var(--color-ink-muted)] line-through tabular">
-                        {p.original}
-                      </span>
-                      <span className="font-display text-lg font-bold text-[var(--color-orange)] tabular">
-                        {p.intro}
-                      </span>
-                    </div>
-                  </div>
-                  <div
-                    className={cn(
-                      "flex flex-shrink-0 flex-col items-center justify-center rounded-[var(--radius-input)] px-3 py-2 text-center tabular transition-colors",
-                      active
-                        ? "bg-[var(--color-orange)] text-white"
-                        : "bg-[var(--color-orange-pale)] text-[var(--color-orange)]",
-                    )}
-                  >
-                    <span className="font-display text-xl font-extrabold leading-none">
-                      {p.perDay}
-                    </span>
-                    <span
-                      className={cn(
-                        "mt-1 text-[9px] font-bold uppercase tracking-wider leading-none",
-                        active ? "text-white/90" : "text-[var(--color-ink-muted)]",
-                      )}
-                    >
-                      {t.paywall.perDay}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      {renderPlansBlock()}
 
       {/* CTA — one-tap charge for returning users with a saved card */}
       {savedPm ? (
@@ -548,6 +602,8 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         </Button>
       )}
 
+      <PaymentTrustStrip heading={t.paywall.payTrustHeading} />
+
       <p className="mb-6 text-center text-[11px] leading-relaxed text-[var(--color-ink-muted)]">
         {fmt(t.paywall.autoRenew, {
           period: planPeriod,
@@ -556,17 +612,17 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         })}
       </p>
 
-      {/* Money-back inline reassurance */}
-      <Card className="mb-8 flex items-center gap-4 border-2 border-[var(--color-green)]/30 bg-[#e8f5dc] !p-4">
-        <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full bg-white shadow-[var(--shadow-chip)] overflow-hidden">
+      {/* Money-back inline reassurance — a touch larger than the original. */}
+      <Card className="mb-8 flex items-center gap-4 border-2 border-[var(--color-green)]/40 bg-[#e8f5dc] !p-5">
+        <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-full bg-white shadow-[var(--shadow-chip)] overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={ICON.guaranteeSmall} alt="" aria-hidden className="h-9 w-9 object-contain" />
+          <img src={ICON.guaranteeSmall} alt="" aria-hidden className="h-11 w-11 object-contain" />
         </div>
         <div>
-          <p className="font-display text-base font-bold text-[var(--color-ink)]">
+          <p className="font-display text-lg font-bold text-[var(--color-ink)]">
             {t.paywall.refundTitle}
           </p>
-          <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
+          <p className="mt-0.5 text-[13px] leading-snug text-[var(--color-ink-soft)]">
             {t.paywall.refundBody}
           </p>
         </div>
@@ -594,6 +650,17 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
           }}
         />
       </div>
+
+      {/* FAQ — handles late-stage objections right before final big-trust block. */}
+      <FAQAccordion
+        heading={t.paywall.faqHeading}
+        items={[
+          { q: t.paywall.faq1Q, a: t.paywall.faq1A },
+          { q: t.paywall.faq2Q, a: t.paywall.faq2A },
+          { q: t.paywall.faq3Q, a: t.paywall.faq3A },
+          { q: t.paywall.faq4Q, a: t.paywall.faq4A },
+        ]}
+      />
 
       {/* Big trust cards — Origene-style */}
       <div className="mt-8 space-y-4">

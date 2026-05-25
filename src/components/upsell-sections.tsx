@@ -594,34 +594,55 @@ async function chargeUpsell(
   }
 
   const data = (await res.json().catch(() => ({}))) as {
-    success?: boolean;
     alreadyOwned?: boolean;
-    requiresAction?: boolean;
     requiresCheckout?: boolean;
     clientSecret?: string;
     publishableKey?: string;
+    paymentIntentId?: string;
     error?: string;
-    message?: string;
   };
 
   if (data.alreadyOwned) return "success";
-  if (data.success) return "success";
   if (data.requiresCheckout) return "checkout";
 
-  if (data.requiresAction && data.clientSecret && data.publishableKey) {
-    try {
-      const stripe = await loadStripe(data.publishableKey);
-      if (!stripe) return t.upsells.paymentFailed;
-      const { error, paymentIntent } = await stripe.handleNextAction({
-        clientSecret: data.clientSecret,
-      });
-      if (error) return error.message ?? t.upsells.paymentFailed;
-      if (paymentIntent?.status === "succeeded") return "success";
-      return t.upsells.paymentFailed;
-    } catch (err) {
-      return err instanceof Error ? err.message : t.upsells.paymentFailed;
-    }
+  if (!data.clientSecret || !data.publishableKey) {
+    return data.error ?? t.upsells.paymentFailed;
   }
 
-  return data.error ?? t.upsells.paymentFailed;
+  // On-session confirm. Stripe.js triggers a 3DS modal if the issuing bank
+  // requires SCA (every EU card), otherwise confirms silently. Either way
+  // the customer's saved card is used — they never re-enter card details.
+  let stripe: Awaited<ReturnType<typeof loadStripe>>;
+  try {
+    stripe = await loadStripe(data.publishableKey);
+  } catch {
+    return t.upsells.paymentFailed;
+  }
+  if (!stripe) return t.upsells.paymentFailed;
+
+  const confirm = await stripe.confirmPayment({
+    clientSecret: data.clientSecret,
+    confirmParams: { return_url: window.location.href },
+    redirect: "if_required",
+  });
+  if (confirm.error) {
+    return confirm.error.message ?? t.upsells.paymentFailed;
+  }
+  if (confirm.paymentIntent?.status !== "succeeded") {
+    return t.upsells.paymentFailed;
+  }
+
+  // Record + fire the pipeline server-side. Idempotent with the Stripe
+  // webhook — whichever lands first wins, the other is a no-op. Not blocking
+  // on this: a missed finalize still gets picked up by the webhook in prod.
+  try {
+    await fetch("/api/upsell-finalize", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ paymentIntentId: confirm.paymentIntent.id }),
+    });
+  } catch {
+    /* webhook is the safety net */
+  }
+  return "success";
 }

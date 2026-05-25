@@ -354,21 +354,12 @@ function CardSection({
         return_url: redirectTarget,
         payment_method_data: {
           billing_details: {
-            // Stripe requires us to pass any field we set to "never" in the
-            // PaymentElement's fields config. Email comes from /api/checkout
-            // (we collected it on /email pre-paywall). Name/phone are not
-            // collected by us — empty strings satisfy Stripe.
+            // Send only the fields we actually have — empty strings pollute
+            // the risk signal the bank uses to decide whether to skip the
+            // 3DS challenge. Postal code is collected by the PaymentElement
+            // (postalCode: "auto") and merged in automatically.
             email: customerEmail ?? undefined,
-            name: "",
-            phone: "",
-            address: {
-              // Country can't be empty per Stripe — derive from timezone.
-              country: detectCountry(),
-              line1: "",
-              line2: "",
-              city: "",
-              state: "",
-            },
+            address: { country: detectCountry() },
           },
         },
       },
@@ -395,15 +386,21 @@ function CardSection({
             fields: {
               billingDetails: {
                 email: emailFieldMode,
-                name: "never",
-                phone: "never",
+                // "auto" means Stripe shows the field only when the payment
+                // method actually requires it. For cards in RO/EU this is
+                // almost always invisible (PaymentElement only shows card +
+                // postal code), but on the rare card/bank that does need
+                // more, the customer gets the chance to provide it instead
+                // of failing 3DS outright with empty data.
+                name: "auto",
+                phone: "auto",
                 address: {
                   country: "never",
                   postalCode: "auto",
-                  line1: "never",
-                  line2: "never",
-                  city: "never",
-                  state: "never",
+                  line1: "auto",
+                  line2: "auto",
+                  city: "auto",
+                  state: "auto",
                 },
               },
             },

@@ -224,7 +224,7 @@ export const ro: Dictionary = {
 
   paywall: {
     offerBannerTitle: "Ofertă specială rezervată pentru tine",
-    offerBannerSub: "Asigură-ți prețul cu reducere",
+    offerBannerSub: "Prețul rămâne valabil pentru",
     offerExpiring: "Oferta este pe cale să expire",
     offerLeft: "rămas",
     // Implicit subject is "poza/fața" (feminine) → feminine form.
@@ -233,7 +233,13 @@ export const ro: Dictionary = {
     mainHeadline: "Deblochează raportul complet",
     mainSubhead:
       "Defalcarea moștenirii · Harta migrațiilor · Poveste personalizată · Card de partajat",
+    heroStatRegions: "94 de regiuni ancestrale",
+    heroStatGenerations: "8 generații în urmă",
     unlockCta: "Deblochează raportul",
+    // English includes "raportul" (the report) but Romanian gets clamped at
+    // typical button widths once the currency code "RON" is added — so we
+    // drop the object noun. Context from the page heading carries it.
+    unlockCtaFromPerDay: "Deblochează — de la {price}/zi",
     previewLabel: "Previzualizare",
     previewTitle: "Cele mai relevante potriviri ale moștenirii tale",
     lockedLabel: "Blocat",
@@ -259,7 +265,18 @@ export const ro: Dictionary = {
     planLabel7d: "7 Zile",
     planLabel1m: "1 Lună",
     planBadgeMostPopular: "Cel mai popular",
+    planBadgeMostPopularSave: "Cel mai popular — Economisești {percent}%",
     perDay: "Pe zi",
+    payTrustHeading: "Plată securizată garantată",
+    faqHeading: "Ai întrebări?",
+    faq1Q: "Cum funcționează Facelineage?",
+    faq1A: "AI-ul nostru analizează geometria, proporțiile și tonul pielii din selfie-ul tău și le compară cu 94 de populații de referință. Rezultatul: o defalcare procentuală a moștenirii, o hartă a migrațiilor și o poveste scrisă care îți leagă trăsăturile de istorie.",
+    faq2Q: "Selfie-ul meu este stocat sau partajat cu cineva?",
+    faq2A: "Poza ta este criptată în timpul transmiterii, folosită doar pentru analiza ta și se șterge automat după 30 de zile. Nu o vindem niciodată, nu o dăm advertiserilor și nu o folosim pentru antrenament. O poți șterge mai devreme din contul tău.",
+    faq3Q: "Pot anula abonamentul oricând?",
+    faq3A: "Da — o singură atingere în contul tău încheie abonamentul imediat. Fără apeluri telefonice, fără schimburi de e-mail. Păstrezi accesul până la sfârșitul perioadei plătite.",
+    faq4Q: "Primesc banii înapoi dacă nu sunt mulțumit?",
+    faq4A: "Da. Oferim o garanție completă de rambursare pe 30 de zile — fără formulare, fără întrebări incomode. Trimite-ne un mesaj în 30 de zile și îți rambursăm suma integrală.",
     chargeButton: "Plătește {price} cu {label}",
     chargingButton: "Se procesează…",
     useDifferentCard: "Folosește altă metodă de plată",

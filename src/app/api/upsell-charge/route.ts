@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { after } from "next/server";
 import type Stripe from "stripe";
 import {
   stripe,
@@ -9,26 +8,23 @@ import {
   UPSELL_SKU_BY_UI_ID,
 } from "@/lib/stripe";
 import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { recordPurchase } from "@/lib/purchases";
-import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
-import { metaEventId, readRequestContext, sendMetaEvent } from "@/lib/meta/capi";
-
-export const maxDuration = 300;
+import { createClient } from "@/lib/supabase/server";
+import { readRequestContext } from "@/lib/meta/capi";
 
 /**
  * POST /api/upsell-charge
  * Body: { upsell, analysisId }
  *
- * Off-session charge: uses the customer's saved default payment method (set
- * during the initial subscription checkout) to charge the upsell amount
- * without re-prompting for card details.
+ * Creates a PaymentIntent with the customer's saved default payment method
+ * attached but NOT confirmed. The client confirms on-session via
+ * stripe.confirmPayment so Stripe.js handles 3DS in a modal when needed.
+ * The client then POSTs to /api/upsell-finalize to record the purchase.
  *
  * Returns one of:
- *   { success: true }                                — payment captured
- *   { requiresAction: true, clientSecret, publishableKey } — 3DS challenge needed
- *   { requiresCheckout: true }                       — no saved PM, fall back to /checkout
- *   { error: string }                                — declined / failed
+ *   { clientSecret, publishableKey, paymentIntentId } — client confirms next
+ *   { alreadyOwned: true }                            — short-circuit success
+ *   { requiresCheckout: true }                        — no saved PM, fall back to /checkout
+ *   { error: string }                                 — failed
  */
 export async function POST(req: NextRequest) {
   if (!stripe) {
@@ -136,8 +132,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Price misconfigured" }, { status: 500 });
   }
 
-  // Capture Pixel context now so both the immediate CAPI Purchase and the
-  // webhook's parallel CAPI fire have fbp/fbc/ip/ua available.
+  // Capture Pixel context now and stash it on the PI metadata. The click
+  // that started this PI is the most accurate signal — both /api/upsell-finalize
+  // and the Stripe webhook read these back when firing the CAPI Purchase
+  // event later, since they have no browser cookies of their own.
   const ctx = readRequestContext({
     headers: req.headers,
     url: req.headers.get("referer") ?? undefined,
@@ -153,99 +151,26 @@ export async function POST(req: NextRequest) {
   if (ctx.userAgent) piMetadata.meta_ua = ctx.userAgent.slice(0, 500);
   if (ctx.ipAddress) piMetadata.meta_ip = ctx.ipAddress;
 
+  // Create the PI with the saved PM attached but DON'T confirm it. The
+  // client confirms on-session via stripe.confirmPayment so Stripe.js can
+  // handle 3DS in a modal when the issuing bank requires SCA — without
+  // this, EU cards (which almost always require 3DS) fail every upsell.
   try {
     const pi = await stripe.paymentIntents.create({
       amount,
       currency,
       customer: customer.id,
       payment_method: defaultPm,
-      off_session: true,
-      confirm: true,
       description: sku,
       metadata: piMetadata,
     });
-
-    if (pi.status === "succeeded") {
-      // Belt-and-suspenders: record + fire pipeline here too. The webhook
-      // does the same in production, but on localhost (no `stripe listen`)
-      // it never fires and the user would see "success" with no artifacts.
-      // Both writes are idempotent (recordPurchase dedupes by PI id, and
-      // runUpsellPipeline skips when artifacts already exist).
-      const svc = createServiceClient();
-      const purchaseId = await recordPurchase(svc, {
-        user_id: user.id,
-        analysis_id: analysisId,
-        product_sku: sku,
-        stripe_payment_intent: pi.id,
-        amount_cents: pi.amount,
-        currency: pi.currency,
-      });
-      if (purchaseId) {
-        after(async () => {
-          console.log(`[upsell-charge] firing pipeline sku=${sku} analysis=${analysisId}`);
-          try {
-            await runUpsellPipeline({
-              sku: sku as UpsellSku,
-              analysisId,
-              purchaseId,
-            });
-            console.log(`[upsell-charge] pipeline done sku=${sku} analysis=${analysisId}`);
-          } catch (err) {
-            console.error(`[upsell-charge] pipeline failed sku=${sku}:`, err);
-          }
-        });
-      }
-      // CAPI Purchase — pairs with the browser Pixel fired on the
-      // upsell-popup confirmation. Meta dedupes the webhook's parallel
-      // fire of this same event_id.
-      void sendMetaEvent({
-        eventName: "Purchase",
-        eventId: metaEventId.upsellPurchase(pi.id),
-        eventSourceUrl: ctx.eventSourceUrl,
-        userData: {
-          email: user.email ?? undefined,
-          externalId: user.id,
-          ipAddress: ctx.ipAddress,
-          userAgent: ctx.userAgent,
-          fbp: ctx.fbp,
-          fbc: ctx.fbc,
-        },
-        customData: {
-          currency: pi.currency.toUpperCase(),
-          value: (pi.amount ?? 0) / 100,
-          contentName: sku,
-          contentCategory: "upsell",
-          contentIds: [sku],
-          contentType: "product",
-          numItems: 1,
-        },
-      });
-      return NextResponse.json({ success: true });
-    }
-    if (pi.status === "requires_action") {
-      return NextResponse.json({
-        requiresAction: true,
-        clientSecret: pi.client_secret,
-        publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
-      });
-    }
-    return NextResponse.json(
-      { error: `Payment status: ${pi.status}` },
-      { status: 400 },
-    );
+    return NextResponse.json({
+      clientSecret: pi.client_secret,
+      publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+      paymentIntentId: pi.id,
+    });
   } catch (err) {
-    // Off-session charges raise an error with code 'authentication_required'
-    // when 3DS is required; the PI is attached.
-    const stripeErr = err as Stripe.errors.StripeError & {
-      payment_intent?: Stripe.PaymentIntent;
-    };
-    if (stripeErr.code === "authentication_required" && stripeErr.payment_intent) {
-      return NextResponse.json({
-        requiresAction: true,
-        clientSecret: stripeErr.payment_intent.client_secret,
-        publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
-      });
-    }
+    const stripeErr = err as Stripe.errors.StripeError;
     return NextResponse.json(
       { error: stripeErr.message ?? "Payment failed" },
       { status: 400 },

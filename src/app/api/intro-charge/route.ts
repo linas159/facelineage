@@ -8,10 +8,7 @@ import {
   type PlanKey,
 } from "@/lib/stripe";
 import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { provisionIntroPayment } from "@/lib/provisioning";
-
-export const maxDuration = 300;
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * POST /api/intro-charge
@@ -20,14 +17,17 @@ export const maxDuration = 300;
  * For returning, signed-in users who already have a saved payment method
  * on file. Skips the /checkout page entirely:
  *
- *   1. Creates a subscription with the recurring price + trial + intro fee.
- *   2. Confirms the first invoice's PaymentIntent OFF-SESSION using the
- *      saved default payment method.
- *   3. Returns success → client navigates straight to the report.
+ *   1. Creates a subscription (default_incomplete) with the saved PM
+ *      attached to the first invoice's PaymentIntent.
+ *   2. Returns the PI's clientSecret. The client confirms on-session via
+ *      stripe.confirmPayment so Stripe.js handles 3DS in a modal — EU
+ *      cards almost always require SCA, so off-session confirm fails for
+ *      them.
+ *   3. After confirm succeeds, the client POSTs to /api/intro-finalize to
+ *      run provisioning (record purchase, fire AI pipeline, send email).
  *
- * If the saved PM is missing / removed / needs 3DS authentication, the
- * response indicates that and the client falls back to /checkout or runs
- * Stripe's handleNextAction popup.
+ * If the saved PM is missing/removed, returns { requiresCheckout: true }
+ * and the client falls back to /checkout.
  */
 export async function POST(req: NextRequest) {
   if (!stripe) {
@@ -123,62 +123,13 @@ export async function POST(req: NextRequest) {
 
   const invoice = subscription.latest_invoice as Stripe.Invoice | null;
   const pi = invoice?.payment_intent as Stripe.PaymentIntent | null;
-  if (!pi) {
+  if (!pi?.client_secret) {
     return NextResponse.json({ error: "No PaymentIntent on invoice" }, { status: 500 });
   }
 
-  // Confirm the first invoice's PaymentIntent off-session.
-  try {
-    const confirmed = await stripe.paymentIntents.confirm(pi.id, {
-      off_session: true,
-      payment_method: savedPmId,
-    });
-    if (confirmed.status === "succeeded") {
-      // Run the same provisioning the webhook would (idempotent if it
-      // also fires). User exists already so we pass user.id directly.
-      try {
-        const pm = await stripe.paymentMethods.retrieve(savedPmId);
-        await provisionIntroPayment({
-          pi: confirmed,
-          pm,
-          subscription,
-          email: user.email ?? customer.email ?? "",
-          userId: user.id,
-          analysisId,
-          plan,
-          db: createServiceClient(),
-        });
-      } catch (provErr) {
-        console.error("[intro-charge] provisioning failed:", provErr);
-        // Don't fail the response — webhook will reconcile.
-      }
-      return NextResponse.json({ success: true });
-    }
-    if (confirmed.status === "requires_action" && confirmed.client_secret) {
-      return NextResponse.json({
-        requiresAction: true,
-        clientSecret: confirmed.client_secret,
-        publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
-      });
-    }
-    return NextResponse.json(
-      { error: `Payment status: ${confirmed.status}` },
-      { status: 400 },
-    );
-  } catch (err) {
-    const stripeErr = err as Stripe.errors.StripeError & {
-      payment_intent?: Stripe.PaymentIntent;
-    };
-    if (stripeErr.code === "authentication_required" && stripeErr.payment_intent) {
-      return NextResponse.json({
-        requiresAction: true,
-        clientSecret: stripeErr.payment_intent.client_secret,
-        publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
-      });
-    }
-    return NextResponse.json(
-      { error: stripeErr.message ?? "Charge failed" },
-      { status: 400 },
-    );
-  }
+  return NextResponse.json({
+    clientSecret: pi.client_secret,
+    publishableKey: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+    subscriptionId: subscription.id,
+  });
 }
