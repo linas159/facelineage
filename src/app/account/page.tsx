@@ -81,6 +81,19 @@ export default async function AccountPage() {
               <ManagePortalButton />
             </div>
           )}
+          <div className="mt-4 border-t border-[var(--color-ink)]/10 pt-4">
+            <p className="text-sm font-semibold text-[var(--color-ink)]">Request a refund</p>
+            <p className="mt-1 text-sm text-[var(--color-ink-soft)] leading-relaxed">
+              Not happy with your purchase? Email{" "}
+              <a
+                href="mailto:support@facelineage.com"
+                className="font-semibold text-[var(--color-orange)] underline underline-offset-2"
+              >
+                support@facelineage.com
+              </a>{" "}
+              and we&apos;ll take care of it.
+            </p>
+          </div>
         </Card>
 
         <Card>

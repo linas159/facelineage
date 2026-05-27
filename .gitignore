@@ -47,3 +47,6 @@ supabase/.temp
 # editor + backup files
 *.bak
 .env.local.bak
+
+# generated ad creatives
+ad-posts-output/
