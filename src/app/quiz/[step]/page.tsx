@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { FunnelShell } from "@/components/funnel-shell";
 import { QuizOptions } from "./quiz-options";
+import { QuizEntryGate } from "./quiz-entry-gate";
 import { getDictionary, localized } from "@/lib/i18n/server";
 import { getLocale } from "@/lib/i18n/server";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
@@ -132,6 +133,18 @@ export default async function QuizStepPage({ params }: { params: Promise<{ step:
     iconSrc: o.iconSrc,
   }));
 
+  const content = (
+    <div className="pt-8">
+      <h2 className="mb-8 text-balance">{(stepDict as { q: string }).q}</h2>
+      <QuizOptions
+        questionKey={data.key}
+        options={resolvedOptions}
+        nextHref={localized(next, locale)}
+        prefetchImages={prefetchImages}
+      />
+    </div>
+  );
+
   return (
     <FunnelShell
       step={stepNum}
@@ -139,15 +152,15 @@ export default async function QuizStepPage({ params }: { params: Promise<{ step:
       showBack
       backHref={localized(back, locale)}
     >
-      <div className="pt-8">
-        <h2 className="mb-8 text-balance">{(stepDict as { q: string }).q}</h2>
-        <QuizOptions
-          questionKey={data.key}
-          options={resolvedOptions}
-          nextHref={localized(next, locale)}
-          prefetchImages={prefetchImages}
-        />
-      </div>
+      {/* Step 1 is the funnel entry — gate it through the home-funnel flag so
+          ad traffic deep-linking here still respects the onboarding test. */}
+      {stepNum === 1 ? (
+        <QuizEntryGate onboardingHref={localized("/onboarding/1", locale)}>
+          {content}
+        </QuizEntryGate>
+      ) : (
+        content
+      )}
     </FunnelShell>
   );
 }
