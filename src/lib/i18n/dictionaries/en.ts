@@ -154,6 +154,23 @@ export const en = {
     },
   },
 
+  // 3-screen onboarding carousel (feature-flagged alternative to the quiz).
+  // Each slide pairs a generated visual with a headline + supporting line,
+  // then a Continue/Start CTA. Final slide leads straight to photo capture.
+  onboarding: {
+    slide1Title: "Discover the details of your origin",
+    slide1Body: "Facelineage reads your facial features to reveal your regional heritage — just like a DNA test.",
+    slide2Title: "Explore alternate versions of you",
+    slide2Body: "See how your face might appear if you were born into different cultures around the world.",
+    slide3Title: "Discover how you compare to the world",
+    slide3Body: "Learn what your appearance reveals about your place among 8 billion others.",
+    continueButton: "Continue",
+    startButton: "Start my scan",
+    slide1ImageAlt: "A face being scanned, with a heritage breakdown and country flags",
+    slide2ImageAlt: "The same face reimagined across four different cultures",
+    slide3ImageAlt: "A face standing out from a crowd with a facial-uniqueness score",
+  },
+
   capture: {
     headline: "Now show us your face",
     body: "A clear, front-facing photo gives the most accurate analysis. We delete it after 30 days and never share it.",

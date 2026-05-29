@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
+import { FunnelCta } from "@/components/funnel-cta";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { TestimonialsSection } from "@/components/testimonials";
 import { SlicedPortrait } from "@/components/sliced-portrait";
@@ -61,9 +62,13 @@ export default async function LandingPage() {
             <p className="mb-4 text-center text-sm leading-snug text-[var(--color-ink-soft)]">
               {dict.landing.heroSubhead}
             </p>
-            <Link href={l("/quiz/1")}>
-              <Button size="block">{dict.landing.heroCta}</Button>
-            </Link>
+            <FunnelCta
+              size="block"
+              onboardingHref={l("/onboarding/1")}
+              quizHref={l("/quiz/1")}
+            >
+              {dict.landing.heroCta}
+            </FunnelCta>
             <p className="mt-2.5 text-center text-[11px] text-[var(--color-ink-muted)]">
               {dict.landing.heroRating}
             </p>
@@ -199,11 +204,14 @@ export default async function LandingPage() {
           <p className="mb-6 text-sm text-[var(--color-ink-soft)]">
             {dict.landing.ctaSub}
           </p>
-          <Link href={l("/quiz/1")}>
-            <Button size="block" className="max-w-xs mx-auto">
-              {dict.landing.ctaButton}
-            </Button>
-          </Link>
+          <FunnelCta
+            size="block"
+            className="max-w-xs mx-auto"
+            onboardingHref={l("/onboarding/1")}
+            quizHref={l("/quiz/1")}
+          >
+            {dict.landing.ctaButton}
+          </FunnelCta>
         </Card>
       </section>
 

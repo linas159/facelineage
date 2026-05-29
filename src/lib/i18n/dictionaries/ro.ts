@@ -150,6 +150,20 @@ export const ro: Dictionary = {
     },
   },
 
+  onboarding: {
+    slide1Title: "Descoperă detaliile originii tale",
+    slide1Body: "Facelineage îți citește trăsăturile faciale pentru a-ți dezvălui moștenirea regională — la fel ca un test ADN.",
+    slide2Title: "Explorează versiuni alternative ale tale",
+    slide2Body: "Vezi cum ar putea arăta chipul tău dacă te-ai fi născut în culturi diferite din întreaga lume.",
+    slide3Title: "Descoperă cum te compari cu lumea",
+    slide3Body: "Află ce dezvăluie înfățișarea ta despre locul tău printre 8 miliarde de oameni.",
+    continueButton: "Continuă",
+    startButton: "Începe scanarea",
+    slide1ImageAlt: "Un chip scanat, cu o defalcare a moștenirii și steaguri de țări",
+    slide2ImageAlt: "Același chip reimaginat în patru culturi diferite",
+    slide3ImageAlt: "Un chip care iese în evidență dintr-o mulțime, cu un scor de unicitate facială",
+  },
+
   capture: {
     headline: "Acum arată-ne fața",
     body: "O poză clară, din față, oferă cea mai precisă analiză. O ștergem după 30 de zile și nu o împărtășim niciodată.",
