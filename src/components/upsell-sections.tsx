@@ -50,11 +50,11 @@ const UPSELL_STATICS: UpsellStatic[] = [
 
 // Per-locale display prices (mirrors what's in Stripe + UPSELL_ORIGINAL).
 const UPSELL_PRICE: Record<UpsellId, Record<Currency, number>> = {
-  parents:   { usd: 499, eur: 499, ron: 1900 },
-  ethnicity: { usd: 699, eur: 699, ron: 2700 },
-  ages:      { usd: 699, eur: 699, ron: 2700 },
-  partner:   { usd: 699, eur: 699, ron: 2700 },
-  book:      { usd: 999, eur: 999, ron: 3900 },
+  parents:   { usd: 499, eur: 499, ron: 1900, pln: 1999 },
+  ethnicity: { usd: 699, eur: 699, ron: 2700, pln: 2799 },
+  ages:      { usd: 699, eur: 699, ron: 2700, pln: 2799 },
+  partner:   { usd: 699, eur: 699, ron: 2700, pln: 2799 },
+  book:      { usd: 999, eur: 999, ron: 3900, pln: 3999 },
 };
 
 /** Runtime upsell shape after dictionary keys are resolved. */

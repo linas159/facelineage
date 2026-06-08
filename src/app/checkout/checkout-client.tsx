@@ -445,6 +445,7 @@ function CardSection({
 const INTL_LOCALE: Record<string, string> = {
   en: "en-US",
   ro: "ro-RO",
+  pl: "pl-PL",
 };
 
 function formatMoney(cents: number, currency: string, locale = "en"): string {

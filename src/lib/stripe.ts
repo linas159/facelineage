@@ -52,7 +52,7 @@ export const UPSELL_SKU_BY_UI_ID = {
 // Currency / locale handling
 // ────────────────────────────────────────────────────────────────────────────
 
-export const SUPPORTED_CURRENCIES = ["usd", "eur", "ron"] as const;
+export const SUPPORTED_CURRENCIES = ["usd", "eur", "ron", "pln"] as const;
 export type Currency = (typeof SUPPORTED_CURRENCIES)[number];
 
 export const DEFAULT_CURRENCY: Currency = "usd";
@@ -69,6 +69,7 @@ export function isCurrency(s: string | null | undefined): s is Currency {
 const LOCALE_TO_CURRENCY: Record<string, Currency> = {
   en: "usd",
   ro: "ron",
+  pl: "pln",
 };
 
 export function pickCurrency(locale: string | null | undefined): Currency {
@@ -80,6 +81,7 @@ export function pickCurrency(locale: string | null | undefined): Currency {
 const LOCALE_FOR_INTL: Record<string, string> = {
   en: "en-US",
   ro: "ro-RO",
+  pl: "pl-PL",
 };
 
 /**
@@ -108,7 +110,7 @@ export function formatPrice(
  * decide whether to render its custom PayPal button (Stripe's
  * ExpressCheckoutElement auto-hides Link itself).
  */
-const PAYPAL_CURRENCIES: ReadonlySet<Currency> = new Set(["usd", "eur"]);
+const PAYPAL_CURRENCIES: ReadonlySet<Currency> = new Set(["usd", "eur", "pln"]);
 
 export function currencySupportsPayPal(currency: string | null | undefined): boolean {
   return !!currency && PAYPAL_CURRENCIES.has(currency.toLowerCase() as Currency);
@@ -144,9 +146,9 @@ export const PLANS = {
     introPeriod: "3 days",
     recurringInterval: "week" as const,
     recurringPeriod: "week",
-    intro: { usd: 195, eur: 195, ron: 700 } satisfies Amounts,
-    recurring: { usd: 2499, eur: 2499, ron: 9900 } satisfies Amounts,
-    original: { usd: 995, eur: 995, ron: 3900 } satisfies Amounts,
+    intro: { usd: 195, eur: 195, ron: 700, pln: 799 } satisfies Amounts,
+    recurring: { usd: 2499, eur: 2499, ron: 9900, pln: 9999 } satisfies Amounts,
+    original: { usd: 995, eur: 995, ron: 3900, pln: 3999 } satisfies Amounts,
   },
   sub_intro_7d: {
     labelKey: "planLabel7d" as const,
@@ -154,9 +156,9 @@ export const PLANS = {
     introPeriod: "7 days",
     recurringInterval: "week" as const,
     recurringPeriod: "week",
-    intro: { usd: 395, eur: 395, ron: 1500 } satisfies Amounts,
-    recurring: { usd: 2499, eur: 2499, ron: 9900 } satisfies Amounts,
-    original: { usd: 1299, eur: 1299, ron: 4900 } satisfies Amounts,
+    intro: { usd: 395, eur: 395, ron: 1500, pln: 1599 } satisfies Amounts,
+    recurring: { usd: 2499, eur: 2499, ron: 9900, pln: 9999 } satisfies Amounts,
+    original: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 } satisfies Amounts,
   },
   sub_intro_1m: {
     labelKey: "planLabel1m" as const,
@@ -164,9 +166,9 @@ export const PLANS = {
     introPeriod: "1 month",
     recurringInterval: "month" as const,
     recurringPeriod: "month",
-    intro: { usd: 1395, eur: 1395, ron: 5500 } satisfies Amounts,
-    recurring: { usd: 4799, eur: 4799, ron: 18900 } satisfies Amounts,
-    original: { usd: 3999, eur: 3999, ron: 15900 } satisfies Amounts,
+    intro: { usd: 1395, eur: 1395, ron: 5500, pln: 5599 } satisfies Amounts,
+    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199 } satisfies Amounts,
+    original: { usd: 3999, eur: 3999, ron: 15900, pln: 15999 } satisfies Amounts,
   },
 } as const;
 
@@ -176,11 +178,11 @@ export type PlanKey = keyof typeof PLANS;
 export const UPSELL_ORIGINAL: Record<PriceSku, Amounts | null> = {
   recur_week: null,
   recur_month: null,
-  upsell_v2_parents: { usd: 899, eur: 899, ron: 3500 },
-  upsell_v2_ethnicity: { usd: 1299, eur: 1299, ron: 4900 },
-  upsell_v2_ages: { usd: 1299, eur: 1299, ron: 4900 },
-  upsell_v2_partner: { usd: 1299, eur: 1299, ron: 4900 },
-  upsell_v2_book: { usd: 1799, eur: 1799, ron: 6900 },
+  upsell_v2_parents: { usd: 899, eur: 899, ron: 3500, pln: 3599 },
+  upsell_v2_ethnicity: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 },
+  upsell_v2_ages: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 },
+  upsell_v2_partner: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 },
+  upsell_v2_book: { usd: 1799, eur: 1799, ron: 6900, pln: 7199 },
 };
 
 /**

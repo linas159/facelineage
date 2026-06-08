@@ -2,7 +2,7 @@
 //
 // Creates Facelineage's Stripe products + multi-currency prices.
 // Chained intro→recurring tiers can't be set up via the Stripe Dashboard UI;
-// this script creates them via the API. Each Price holds USD + EUR + RON
+// this script creates them via the API. Each Price holds USD + EUR + RON + PLN
 // amounts via `currency_options` so we pass `currency` at checkout time and
 // Stripe picks the matching amount.
 //
@@ -29,7 +29,7 @@ const stripe = new Stripe(key, { apiVersion: "2024-12-18.acacia" });
 // USD is the default (`unit_amount` / `currency`); the rest live under
 // `currency_options`.
 const DEFAULT_CURRENCY = "usd";
-const ALT_CURRENCIES = ["eur", "ron"];
+const ALT_CURRENCIES = ["eur", "ron", "pln"];
 
 // Only the recurring prices live in Stripe's catalog. The intro fee is
 // charged via PaymentIntent at checkout time (amounts sourced from PLANS in
@@ -37,27 +37,27 @@ const ALT_CURRENCIES = ["eur", "ron"];
 const SUBSCRIPTION_TIERS = [
   {
     name: "Facelineage Weekly",
-    recurringLookup: "fl_recur_week_mc_v1",
+    recurringLookup: "fl_recur_week_mc_v2",
     recurringInterval: "week",
     recurringNickname: "$24.99 / week (multi-currency)",
-    amounts: { usd: 2499, eur: 2499, ron: 9900 },
+    amounts: { usd: 2499, eur: 2499, ron: 9900, pln: 9999 },
   },
   {
     name: "Facelineage Monthly",
-    recurringLookup: "fl_recur_month_mc_v1",
+    recurringLookup: "fl_recur_month_mc_v2",
     recurringInterval: "month",
     recurringNickname: "$47.99 / month (multi-currency)",
-    amounts: { usd: 4799, eur: 4799, ron: 18900 },
+    amounts: { usd: 4799, eur: 4799, ron: 18900, pln: 19199 },
   },
 ];
 
 // 5 add-ons offered post-payment (report + dashboard).
 const UPSELLS = [
-  { envKey: "STRIPE_PRICE_UPSELL_PARENTS",   name: "Facelineage: What Each Parent Gave You", lookup: "fl_upsell_parents_mc_v1",   amounts: { usd: 499, eur: 499, ron: 1900 } },
-  { envKey: "STRIPE_PRICE_UPSELL_ETHNICITY", name: "Facelineage: Heritage Mirror",            lookup: "fl_upsell_ethnicity_mc_v1", amounts: { usd: 699, eur: 699, ron: 2700 } },
-  { envKey: "STRIPE_PRICE_UPSELL_AGES",      name: "Facelineage: Through The Ages",           lookup: "fl_upsell_ages_mc_v1",      amounts: { usd: 699, eur: 699, ron: 2700 } },
-  { envKey: "STRIPE_PRICE_UPSELL_PARTNER",   name: "Facelineage: Future Partner",             lookup: "fl_upsell_partner_mc_v1",   amounts: { usd: 699, eur: 699, ron: 2700 } },
-  { envKey: "STRIPE_PRICE_UPSELL_BOOK",      name: "Facelineage: Heritage Book",              lookup: "fl_upsell_book_mc_v1",      amounts: { usd: 999, eur: 999, ron: 3900 } },
+  { envKey: "STRIPE_PRICE_UPSELL_PARENTS",   name: "Facelineage: What Each Parent Gave You", lookup: "fl_upsell_parents_mc_v2",   amounts: { usd: 499, eur: 499, ron: 1900, pln: 1999 } },
+  { envKey: "STRIPE_PRICE_UPSELL_ETHNICITY", name: "Facelineage: Heritage Mirror",            lookup: "fl_upsell_ethnicity_mc_v2", amounts: { usd: 699, eur: 699, ron: 2700, pln: 2799 } },
+  { envKey: "STRIPE_PRICE_UPSELL_AGES",      name: "Facelineage: Through The Ages",           lookup: "fl_upsell_ages_mc_v2",      amounts: { usd: 699, eur: 699, ron: 2700, pln: 2799 } },
+  { envKey: "STRIPE_PRICE_UPSELL_PARTNER",   name: "Facelineage: Future Partner",             lookup: "fl_upsell_partner_mc_v2",   amounts: { usd: 699, eur: 699, ron: 2700, pln: 2799 } },
+  { envKey: "STRIPE_PRICE_UPSELL_BOOK",      name: "Facelineage: Heritage Book",              lookup: "fl_upsell_book_mc_v2",      amounts: { usd: 999, eur: 999, ron: 3900, pln: 3999 } },
 ];
 
 function buildCurrencyOptions(amounts) {
