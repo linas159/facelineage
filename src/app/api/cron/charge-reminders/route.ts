@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { stripe, priceAmountFor, isCurrency, formatPrice, type Currency } from "@/lib/stripe";
 import { renderUpcomingChargeEmail } from "@/lib/email/templates";
+import { createServiceClient } from "@/lib/supabase/server";
 import { Resend } from "resend";
 
 export const runtime = "nodejs";
@@ -71,6 +72,39 @@ export async function GET(req: Request) {
   let skipped = 0;
   let scanned = 0;
   let errors = 0;
+
+  // Each checkout creates TWO subscriptions (a wallets/PayPal flow and a card
+  // flow) and only the one the customer actually pays is kept — the other is
+  // an abandoned sibling that still sits in `trialing`. Track customers we've
+  // already emailed this run so a customer can never receive two copies.
+  const emailedCustomers = new Set<string>();
+
+  // Source of truth for "the customer was ACTUALLY charged". Our own
+  // `subscriptions` table gets a row only when an intro payment succeeds
+  // (provisionIntroPayment, on invoice.paid), and the row is keyed by user_id
+  // so only the real paid sibling's id is ever stored. So a checkout that was
+  // never charged, AND the abandoned PayPal/card sibling, are both absent —
+  // letting us email strictly the subscriptions we have a paid record for.
+  // We scope to currently-billable statuses (a charge can only come from one
+  // of these) and paginate so accounts with >1k subscribers aren't truncated.
+  const db = createServiceClient();
+  const chargedSubIds = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db
+      .from("subscriptions")
+      .select("stripe_subscription_id")
+      .in("status", ["trialing", "active", "past_due"])
+      .range(from, from + PAGE - 1);
+    if (error) {
+      console.error("[cron] failed to load subscriptions from DB:", error);
+      return NextResponse.json({ error: "DB read failed" }, { status: 500 });
+    }
+    for (const row of data ?? []) {
+      if (row.stripe_subscription_id) chargedSubIds.add(row.stripe_subscription_id);
+    }
+    if (!data || data.length < PAGE) break;
+  }
 
   // Prices carry their alt-currency amounts in `currency_options`, which is
   // only populated when expanded. We can't expand it on the list call —
@@ -144,11 +178,25 @@ export async function GET(req: Request) {
         const chargeAmount = formatPrice(amountCents, subCurrency);
         const interval = price.recurring?.interval ?? undefined;
 
-        // Card last-4: prefer the subscription's own default PM (expanded
-        // above), else fall back to the customer's default PM.
-        let cardLast4 = last4Of(sub.default_payment_method);
-
         const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+
+        // Only email subscriptions the customer was ACTUALLY charged for.
+        // Anything absent from our paid-subscriptions set is either a checkout
+        // that never paid or the abandoned dual-flow sibling — skip it. This
+        // is the fix for emails going to never-charged customers and for the
+        // duplicate-per-customer sends (only one sibling is ever recorded).
+        if (!chargedSubIds.has(sub.id)) {
+          skipped++;
+          continue;
+        }
+
+        // Belt-and-suspenders against the dual-subscription setup: never email
+        // the same customer twice in one run.
+        if (emailedCustomers.has(customerId)) {
+          skipped++;
+          continue;
+        }
+
         const customer = await stripe.customers.retrieve(customerId, {
           expand: ["invoice_settings.default_payment_method"],
         });
@@ -161,9 +209,12 @@ export async function GET(req: Request) {
           skipped++;
           continue;
         }
-        if (!cardLast4) {
-          cardLast4 = last4Of(customer.invoice_settings?.default_payment_method ?? null);
-        }
+
+        // Card last-4 for the email: prefer the subscription's own default PM,
+        // else the customer's default PM.
+        const cardLast4 =
+          last4Of(sub.default_payment_method) ??
+          last4Of(customer.invoice_settings?.default_payment_method ?? null);
 
         const firstName = customer.name?.trim().split(/\s+/)[0] || undefined;
         const chargeDate = new Date(chargeAt * 1000).toLocaleDateString("en-US", {
@@ -186,6 +237,7 @@ export async function GET(req: Request) {
           console.log(
             `[cron][dry-run] would send to ${email} sub=${sub.id} at=${chargeAt} amount=${chargeAmount} subject="${subject}"`,
           );
+          emailedCustomers.add(customerId);
           sent++;
           continue;
         }
@@ -195,6 +247,7 @@ export async function GET(req: Request) {
           await stripe.subscriptions.update(sub.id, {
             metadata: { ...(sub.metadata ?? {}), charge_reminder_sent_for: String(chargeAt) },
           });
+          emailedCustomers.add(customerId);
           console.log(`[cron] charge reminder sent to ${email} sub=${sub.id} at=${chargeAt}`);
           sent++;
         } catch (err) {
