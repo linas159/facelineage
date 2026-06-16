@@ -42,6 +42,17 @@ export async function GET(req: Request) {
   if (!expected || auth !== `Bearer ${expected}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Operational/test affordances (still require the CRON_SECRET above):
+  //   ?dryRun=1        → scan + render but never send or stamp metadata.
+  //   ?windowHours=N   → widen the look-ahead, honored ONLY in dry-run so a
+  //                      real run can never email customers far ahead of time.
+  const params = new URL(req.url).searchParams;
+  const dryRun = params.get("dryRun") === "1";
+  const windowHours =
+    dryRun && params.get("windowHours")
+      ? Number(params.get("windowHours")) || WINDOW_HOURS
+      : WINDOW_HOURS;
   if (!stripe) return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
 
   const resendKey = process.env.RESEND_API_KEY;
@@ -54,117 +65,154 @@ export async function GET(req: Request) {
   const manageUrl = `${baseUrl}/account`;
 
   const now = Math.floor(Date.now() / 1000);
-  const windowEnd = now + WINDOW_HOURS * 3600;
+  const windowEnd = now + windowHours * 3600;
 
   let sent = 0;
   let skipped = 0;
   let scanned = 0;
+  let errors = 0;
+
+  // Prices carry their alt-currency amounts in `currency_options`, which is
+  // only populated when expanded. We can't expand it on the list call —
+  // `data.items.data.price.currency_options` is 5 levels deep and Stripe caps
+  // expansion at 4, which throws and 500s the whole run. So we fetch each
+  // unique price once (cached by id) with a shallow `currency_options` expand.
+  const priceCache = new Map<string, Stripe.Price>();
+  const priceWithCurrencyOptions = async (p: Stripe.Price): Promise<Stripe.Price> => {
+    if (p.currency_options) return p;
+    const cached = priceCache.get(p.id);
+    if (cached) return cached;
+    const full = await stripe.prices.retrieve(p.id, { expand: ["currency_options"] });
+    priceCache.set(p.id, full);
+    return full;
+  };
 
   // Both states have an upcoming charge: trialing → first real charge at
   // trial_end; active → next renewal at current_period_end. We auto-paginate
   // each list (for-await on the Stripe ApiListPromise) so large accounts are
-  // covered, not just the first 100.
+  // covered, not just the first 100. `default_payment_method` is expanded for
+  // the card last-4 (only 2 levels deep — safe).
   for (const status of ["trialing", "active"] as const) {
     for await (const sub of stripe.subscriptions.list({
       status,
       limit: 100,
-      expand: [
-        "data.items.data.price.currency_options",
-        "data.default_payment_method",
-      ],
+      expand: ["data.default_payment_method"],
     })) {
       scanned++;
-
-      const chargeAt = status === "trialing" ? sub.trial_end : sub.current_period_end;
-      // Outside the look-ahead window, or no charge coming → skip.
-      if (!chargeAt || chargeAt < now || chargeAt > windowEnd) {
-        skipped++;
-        continue;
-      }
-      // The subscription is set to end at period end → no charge tomorrow.
-      if (sub.cancel_at_period_end) {
-        skipped++;
-        continue;
-      }
-      // Already reminded for this exact charge (covers the legacy
-      // `trial_reminder_sent` flag from the old trial-only cron too).
-      if (
-        sub.metadata?.charge_reminder_sent_for === String(chargeAt) ||
-        (status === "trialing" && sub.metadata?.trial_reminder_sent === "1")
-      ) {
-        skipped++;
-        continue;
-      }
-
-      // Amount + interval for the charge, in the subscription's own currency.
-      const item = sub.items.data[0];
-      const price = item?.price;
-      if (!price) {
-        skipped++;
-        continue;
-      }
-      const subCurrency: Currency = isCurrency(sub.currency) ? sub.currency : "usd";
-      const amountCents = priceAmountFor(price, subCurrency);
-      if (!amountCents) {
-        skipped++;
-        continue;
-      }
-      const chargeAmount = formatPrice(amountCents, subCurrency);
-      const interval = price.recurring?.interval ?? undefined;
-
-      // Card last-4: prefer the subscription's own default PM (expanded
-      // above), else fall back to the customer's default PM.
-      let cardLast4 = last4Of(sub.default_payment_method);
-
-      const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
-      const customer = await stripe.customers.retrieve(customerId, {
-        expand: ["invoice_settings.default_payment_method"],
-      });
-      if (customer.deleted) {
-        skipped++;
-        continue;
-      }
-      const email = customer.email;
-      if (!email) {
-        skipped++;
-        continue;
-      }
-      if (!cardLast4) {
-        cardLast4 = last4Of(customer.invoice_settings?.default_payment_method ?? null);
-      }
-
-      const firstName = customer.name?.trim().split(/\s+/)[0] || undefined;
-      const chargeDate = new Date(chargeAt * 1000).toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      });
-
-      const { subject, html, text } = renderUpcomingChargeEmail({
-        firstName,
-        isFirstCharge: status === "trialing",
-        chargeAmount,
-        interval,
-        chargeDate,
-        cardLast4,
-        manageUrl,
-      });
-
+      // One malformed subscription (or a transient Stripe error mid-loop)
+      // must not abort the whole run and starve everyone else.
       try {
-        await resend.emails.send({ from: FROM, to: email, replyTo: REPLY_TO, subject, html, text });
-        await stripe.subscriptions.update(sub.id, {
-          metadata: { ...(sub.metadata ?? {}), charge_reminder_sent_for: String(chargeAt) },
+        const chargeAt = status === "trialing" ? sub.trial_end : sub.current_period_end;
+        // Outside the look-ahead window, or no charge coming → skip.
+        if (!chargeAt || chargeAt < now || chargeAt > windowEnd) {
+          skipped++;
+          continue;
+        }
+        // The subscription is set to end at period end → no charge tomorrow.
+        if (sub.cancel_at_period_end) {
+          skipped++;
+          continue;
+        }
+        // Already reminded for this exact charge (covers the legacy
+        // `trial_reminder_sent` flag from the old trial-only cron too).
+        if (
+          sub.metadata?.charge_reminder_sent_for === String(chargeAt) ||
+          (status === "trialing" && sub.metadata?.trial_reminder_sent === "1")
+        ) {
+          skipped++;
+          continue;
+        }
+
+        // Amount + interval for the charge, in the subscription's own currency.
+        const item = sub.items.data[0];
+        let price = item?.price;
+        if (!price) {
+          skipped++;
+          continue;
+        }
+        const subCurrency: Currency = isCurrency(sub.currency) ? sub.currency : "usd";
+        // Non-default currency → pull the price's currency_options so we email
+        // the right amount (e.g. PLN 99.99, not the USD default).
+        if (price.currency !== subCurrency) {
+          price = await priceWithCurrencyOptions(price);
+        }
+        const amountCents = priceAmountFor(price, subCurrency);
+        if (!amountCents) {
+          skipped++;
+          continue;
+        }
+        const chargeAmount = formatPrice(amountCents, subCurrency);
+        const interval = price.recurring?.interval ?? undefined;
+
+        // Card last-4: prefer the subscription's own default PM (expanded
+        // above), else fall back to the customer's default PM.
+        let cardLast4 = last4Of(sub.default_payment_method);
+
+        const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+        const customer = await stripe.customers.retrieve(customerId, {
+          expand: ["invoice_settings.default_payment_method"],
         });
-        console.log(`[cron] charge reminder sent to ${email} sub=${sub.id} at=${chargeAt}`);
-        sent++;
+        if (customer.deleted) {
+          skipped++;
+          continue;
+        }
+        const email = customer.email;
+        if (!email) {
+          skipped++;
+          continue;
+        }
+        if (!cardLast4) {
+          cardLast4 = last4Of(customer.invoice_settings?.default_payment_method ?? null);
+        }
+
+        const firstName = customer.name?.trim().split(/\s+/)[0] || undefined;
+        const chargeDate = new Date(chargeAt * 1000).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        });
+
+        const { subject, html, text } = renderUpcomingChargeEmail({
+          firstName,
+          isFirstCharge: status === "trialing",
+          chargeAmount,
+          interval,
+          chargeDate,
+          cardLast4,
+          manageUrl,
+        });
+
+        if (dryRun) {
+          console.log(
+            `[cron][dry-run] would send to ${email} sub=${sub.id} at=${chargeAt} amount=${chargeAmount} subject="${subject}"`,
+          );
+          sent++;
+          continue;
+        }
+
+        try {
+          await resend.emails.send({ from: FROM, to: email, replyTo: REPLY_TO, subject, html, text });
+          await stripe.subscriptions.update(sub.id, {
+            metadata: { ...(sub.metadata ?? {}), charge_reminder_sent_for: String(chargeAt) },
+          });
+          console.log(`[cron] charge reminder sent to ${email} sub=${sub.id} at=${chargeAt}`);
+          sent++;
+        } catch (err) {
+          console.error(`[cron] charge reminder send failed for ${email} sub=${sub.id}:`, err);
+          errors++;
+        }
       } catch (err) {
-        console.error(`[cron] charge reminder failed for ${email} sub=${sub.id}:`, err);
-        skipped++;
+        // Per-subscription failure (bad data, transient Stripe error) — log,
+        // count, and keep going so the rest of the run still completes.
+        console.error(`[cron] charge reminder error sub=${sub.id}:`, err);
+        errors++;
       }
     }
   }
 
-  return NextResponse.json({ sent, skipped, scanned });
+  const summary = { sent, skipped, scanned, errors, dryRun, windowHours };
+  console.log(`[cron] charge-reminders run complete`, summary);
+  return NextResponse.json(summary);
 }
 
 /** Pull the card last-4 off an expanded (or string/null) Stripe PaymentMethod. */
