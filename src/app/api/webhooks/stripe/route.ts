@@ -7,7 +7,6 @@ import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
 import { provisionIntroPayment } from "@/lib/provisioning";
 import { getOrCreateAuthUser } from "@/lib/auth-user";
-import { metaEventId, sendMetaEvent } from "@/lib/meta/capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -247,6 +246,17 @@ async function handleInvoicePaid(
   // The metadata.flow=card sibling is unused; legacy field still in
   // metadata for older subs is intentionally ignored.
   void siblingSubId;
+  // Only the first (intro) invoice counts as a website Purchase for Meta.
+  // Renewal invoices (`subscription_cycle`, etc.) re-run this provisioning
+  // path but must NOT re-fire the CAPI Purchase event — counting renewals
+  // would inflate conversions and pollute ad optimization with retention
+  // signal the original ad click didn't drive.
+  const isIntroInvoice = invoice.billing_reason === "subscription_create";
+  if (!isIntroInvoice) {
+    console.log(
+      `[invoice.paid] billing_reason=${invoice.billing_reason} — renewal, suppressing Meta Purchase`,
+    );
+  }
   await provisionIntroPayment({
     pi,
     pm,
@@ -256,6 +266,7 @@ async function handleInvoicePaid(
     analysisId,
     plan,
     db,
+    fireMetaPurchase: isIntroInvoice,
   });
   // Stamp invoice.amount_paid on the purchase record (PI.amount may be 0
   // on subscription invoices in some Stripe API states). Idempotent: the
@@ -296,43 +307,10 @@ async function handleUpsellPaid(
     return;
   }
 
-  // CAPI Purchase for the upsell. Reads fbp/fbc/ua/ip stashed on the PI
-  // metadata by /api/upsell-charge. If the same event was also fired from
-  // /api/upsell-charge, Meta dedupes via event_id.
-  let email: string | undefined;
-  try {
-    const cust = pi.customer
-      ? await stripe.customers.retrieve(
-          typeof pi.customer === "string" ? pi.customer : pi.customer.id,
-        )
-      : null;
-    if (cust && !("deleted" in cust && cust.deleted)) {
-      email = (cust as Stripe.Customer).email ?? undefined;
-    }
-  } catch {
-    // ignore — fbp/fbc/ip/ua + externalId still give a decent match
-  }
-  void sendMetaEvent({
-    eventName: "Purchase",
-    eventId: metaEventId.upsellPurchase(pi.id),
-    userData: {
-      email,
-      externalId: userId,
-      fbp: md.meta_fbp,
-      fbc: md.meta_fbc,
-      ipAddress: md.meta_ip,
-      userAgent: md.meta_ua,
-    },
-    customData: {
-      currency: pi.currency.toUpperCase(),
-      value: (pi.amount ?? 0) / 100,
-      contentName: sku,
-      contentCategory: "upsell",
-      contentIds: [sku],
-      contentType: "product",
-      numItems: 1,
-    },
-  });
+  // Upsells are intentionally NOT sent to Meta as Purchase events. Only the
+  // intro subscription charge counts as a website Purchase — counting upsells
+  // double-fires Purchase for an already-acquired customer and muddies the
+  // ad-optimization signal.
 
   console.log(`Firing upsell pipeline: sku=${sku} analysis=${analysisId} purchase=${purchaseId}`);
   after(async () => {

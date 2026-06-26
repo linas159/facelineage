@@ -4,7 +4,6 @@ import { stripe } from "@/lib/stripe";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { recordPurchase } from "@/lib/purchases";
 import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
-import { metaEventId, readRequestContext, sendMetaEvent } from "@/lib/meta/capi";
 
 export const maxDuration = 300;
 
@@ -78,35 +77,10 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // CAPI Purchase — uses the fbp/fbc/ip/ua we stashed on the PI metadata
-  // when /api/upsell-charge created it (the original click was the most
-  // accurate signal). Falls back to this request's context if absent.
-  const ctx = readRequestContext({
-    headers: req.headers,
-    url: req.headers.get("referer") ?? undefined,
-  });
-  void sendMetaEvent({
-    eventName: "Purchase",
-    eventId: metaEventId.upsellPurchase(pi.id),
-    eventSourceUrl: ctx.eventSourceUrl,
-    userData: {
-      email: user.email ?? undefined,
-      externalId: user.id,
-      ipAddress: pi.metadata.meta_ip ?? ctx.ipAddress,
-      userAgent: pi.metadata.meta_ua ?? ctx.userAgent,
-      fbp: pi.metadata.meta_fbp ?? ctx.fbp,
-      fbc: pi.metadata.meta_fbc ?? ctx.fbc,
-    },
-    customData: {
-      currency: pi.currency.toUpperCase(),
-      value: (pi.amount ?? 0) / 100,
-      contentName: sku,
-      contentCategory: "upsell",
-      contentIds: [sku],
-      contentType: "product",
-      numItems: 1,
-    },
-  });
+  // Upsells are intentionally NOT sent to Meta as Purchase events. Only the
+  // intro subscription charge counts as a website Purchase — see
+  // /lib/provisioning.ts. Counting upsells double-fires Purchase for an
+  // already-acquired customer and muddies the ad-optimization signal.
 
   return NextResponse.json({ success: true });
 }

@@ -34,6 +34,13 @@ export async function provisionIntroPayment(opts: {
   analysisId: string;
   plan: PlanKey;
   db?: DB;
+  /**
+   * Fire the CAPI Purchase event to Meta. Defaults to true. The Stripe
+   * `invoice.paid` webhook passes false for renewal invoices so that only
+   * the first (intro) charge is counted as a website Purchase — renewals
+   * must not pollute the ad-optimization signal.
+   */
+  fireMetaPurchase?: boolean;
 }): Promise<void> {
   if (!stripe) return;
   const db = opts.db ?? createServiceClient();
@@ -90,30 +97,33 @@ export async function provisionIntroPayment(opts: {
   // + /api/intro-charge) — Meta dedupes by event_id, so identical fires
   // collapse into one conversion. fbp/fbc/ua/ip were stashed on the
   // subscription metadata at /api/checkout time (webhooks have no browser
-  // cookies of their own).
-  const md = opts.subscription.metadata ?? {};
-  const piAmount = opts.pi.amount ?? 0;
-  void sendMetaEvent({
-    eventName: "Purchase",
-    eventId: metaEventId.purchase(opts.pi.id),
-    userData: {
-      email: opts.email,
-      externalId: opts.userId,
-      fbp: md.meta_fbp,
-      fbc: md.meta_fbc,
-      ipAddress: md.meta_ip,
-      userAgent: md.meta_ua,
-    },
-    customData: {
-      currency: opts.pi.currency.toUpperCase(),
-      value: piAmount / 100,
-      contentName: opts.plan,
-      contentCategory: "subscription_intro",
-      contentIds: [opts.plan],
-      contentType: "product",
-      numItems: 1,
-    },
-  });
+  // cookies of their own). Only the intro charge fires this — renewals pass
+  // fireMetaPurchase=false so they aren't counted as website Purchases.
+  if (opts.fireMetaPurchase !== false) {
+    const md = opts.subscription.metadata ?? {};
+    const piAmount = opts.pi.amount ?? 0;
+    void sendMetaEvent({
+      eventName: "Purchase",
+      eventId: metaEventId.purchase(opts.pi.id),
+      userData: {
+        email: opts.email,
+        externalId: opts.userId,
+        fbp: md.meta_fbp,
+        fbc: md.meta_fbc,
+        ipAddress: md.meta_ip,
+        userAgent: md.meta_ua,
+      },
+      customData: {
+        currency: opts.pi.currency.toUpperCase(),
+        value: piAmount / 100,
+        contentName: opts.plan,
+        contentCategory: "subscription_intro",
+        contentIds: [opts.plan],
+        contentType: "product",
+        numItems: 1,
+      },
+    });
+  }
 
   // 4. Cancel sibling incomplete subs for this analysis (the wallets/card
   // sibling the user didn't choose). Ignore not-found errors.
