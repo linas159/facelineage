@@ -40,7 +40,6 @@ const QUIZ_STEPS: Step[] = [
     options: [
       { optionKey: "female", emoji: "♀", iconSrc: "/quiz/q1-female.svg" },
       { optionKey: "male", emoji: "♂", iconSrc: "/quiz/q1-male.svg" },
-      { optionKey: "other", emoji: "⚧", iconSrc: "/quiz/q1-other.svg" },
     ],
   },
   {
