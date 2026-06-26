@@ -1,25 +1,35 @@
 import Link from "next/link";
 import { Logo } from "@/components/brand/logo";
+import type { LegalUi } from "@/lib/i18n/legal/types";
 
 interface LegalShellProps {
   title: string;
   lastUpdated: string;
+  /** Locale-aware home URL (e.g. "/" or "/pl"). */
+  homeHref: string;
+  ui: LegalUi;
   children: React.ReactNode;
 }
 
-export function LegalShell({ title, lastUpdated, children }: LegalShellProps) {
+export function LegalShell({
+  title,
+  lastUpdated,
+  homeHref,
+  ui,
+  children,
+}: LegalShellProps) {
   return (
     <main className="min-h-[100dvh] bg-[var(--color-bg-base)]">
       <header className="bg-[var(--color-bg-base)]/95 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-5 py-4">
-          <Link href="/">
+          <Link href={homeHref}>
             <Logo className="h-10" />
           </Link>
           <Link
-            href="/"
+            href={homeHref}
             className="text-sm text-[var(--color-ink-soft)] hover:text-[var(--color-orange)]"
           >
-            Home
+            {ui.home}
           </Link>
         </div>
       </header>
@@ -29,7 +39,7 @@ export function LegalShell({ title, lastUpdated, children }: LegalShellProps) {
           {title}
         </h1>
         <p className="mb-8 text-xs text-[var(--color-ink-muted)]">
-          Last updated: {lastUpdated}
+          {ui.lastUpdated} {lastUpdated}
         </p>
 
         <div className="legal-prose space-y-6 text-[15px] leading-relaxed text-[var(--color-ink-soft)]">
@@ -38,7 +48,7 @@ export function LegalShell({ title, lastUpdated, children }: LegalShellProps) {
 
         <hr className="mt-12 border-[var(--color-line)]" />
         <p className="mt-4 text-xs text-[var(--color-ink-muted)]">
-          Questions? Email{" "}
+          {ui.questions}{" "}
           <a
             href="mailto:support@facelineage.com"
             className="font-semibold text-[var(--color-orange)] hover:underline"

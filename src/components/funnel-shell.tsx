@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Logo } from "@/components/brand/logo";
 import { cn } from "@/lib/utils";
+import { getLocale, localized } from "@/lib/i18n/server";
 
 interface FunnelShellProps {
   children: React.ReactNode;
@@ -17,7 +18,7 @@ interface FunnelShellProps {
  * Shared mobile-first chrome for funnel pages.
  * Phone-sized canvas with optional progress bar at top.
  */
-export function FunnelShell({
+export async function FunnelShell({
   children,
   step,
   totalSteps,
@@ -25,6 +26,9 @@ export function FunnelShell({
   backHref,
   fillViewport = false,
 }: FunnelShellProps) {
+  // The logo links "home" — keep the reader inside their locale (e.g. /pl).
+  const locale = await getLocale();
+  const homeHref = localized("/", locale);
   return (
     <main
       className={cn(
@@ -43,7 +47,7 @@ export function FunnelShell({
               ←
             </Link>
           ) : (
-            <Link href="/">
+            <Link href={homeHref}>
               <Logo className="h-10" />
             </Link>
           )}

@@ -3,6 +3,7 @@ import { FunnelShell } from "@/components/funnel-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale, localized } from "@/lib/i18n/server";
 import { SignUpForm } from "./sign-up-form";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ export default async function SignInPage({
 }) {
   const params = await searchParams;
   const next = params.next ?? "/dashboard";
+  const locale = await getLocale();
 
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
@@ -65,7 +67,7 @@ export default async function SignInPage({
 
       <p className="mt-6 text-center text-base leading-relaxed text-[var(--color-ink-soft)]">
         New here?{" "}
-        <Link href="/" className="font-semibold underline hover:text-[var(--color-orange)]">
+        <Link href={localized("/", locale)} className="font-semibold underline hover:text-[var(--color-orange)]">
           Take the quiz to start a report
         </Link>
         .

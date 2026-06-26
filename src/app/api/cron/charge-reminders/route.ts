@@ -142,8 +142,17 @@ export async function GET(req: Request) {
           skipped++;
           continue;
         }
-        // The subscription is set to end at period end → no charge tomorrow.
-        if (sub.cancel_at_period_end) {
+        // The subscription is scheduled to cancel before/at the upcoming charge
+        // → no charge is coming, so don't send a "you'll be charged" reminder.
+        // We check BOTH signals because a cancellation can show up either way:
+        //   • `cancel_at_period_end` — the classic Portal "cancel at period end".
+        //   • `cancel_at` — an explicit stop timestamp (e.g. set by the
+        //     intro→recurring subscription schedule), which can be present while
+        //     `cancel_at_period_end` stays false. This is the field our webhook
+        //     mirrors into the DB, so it's the cancellation signal we trust.
+        // Only `cancel_at` strictly AFTER the charge still bills (e.g. cancel in
+        // 3 months on a weekly plan) → those should still get the reminder.
+        if (sub.cancel_at_period_end || (sub.cancel_at && sub.cancel_at <= chargeAt)) {
           skipped++;
           continue;
         }

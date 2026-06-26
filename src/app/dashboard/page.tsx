@@ -6,6 +6,7 @@ import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { UpsellSections, type UpsellId } from "@/components/upsell-sections";
 import { UpsellDisplay } from "@/components/report/upsell-display";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { getLocale, localized } from "@/lib/i18n/server";
 import type { UpsellArtifact, UpsellSku } from "@/lib/report-loader";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +31,7 @@ export default async function DashboardPage() {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect("/sign-up");
+  const locale = await getLocale();
 
   const { data } = await sb
     .from("analyses")
@@ -127,7 +129,7 @@ export default async function DashboardPage() {
               const inFlight =
                 r.generation_status === "queued" || r.generation_status === "running";
               return (
-                <Link key={r.id} href={`/report/${r.id}`}>
+                <Link key={r.id} href={localized(`/report/${r.id}`, locale)}>
                   <Card className="cursor-pointer transition-transform hover:-translate-y-0.5">
                     <div className="flex items-center justify-between">
                       <div>
@@ -154,10 +156,10 @@ export default async function DashboardPage() {
         )}
 
         <div className="mt-8 grid gap-3">
-          <Link href="/quiz/1">
+          <Link href={localized("/quiz/1", locale)}>
             <Button size="block">+ New analysis</Button>
           </Link>
-          <Link href="/account">
+          <Link href={localized("/account", locale)}>
             <Button size="block" variant="secondary">Account & subscription</Button>
           </Link>
         </div>
