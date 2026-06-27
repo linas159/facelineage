@@ -246,17 +246,19 @@ async function handleInvoicePaid(
   // The metadata.flow=card sibling is unused; legacy field still in
   // metadata for older subs is intentionally ignored.
   void siblingSubId;
-  // Only the first (intro) invoice counts as a website Purchase for Meta.
-  // Renewal invoices (`subscription_cycle`, etc.) re-run this provisioning
-  // path but must NOT re-fire the CAPI Purchase event — counting renewals
-  // would inflate conversions and pollute ad optimization with retention
-  // signal the original ad click didn't drive.
-  const isIntroInvoice = invoice.billing_reason === "subscription_create";
-  if (!isIntroInvoice) {
-    console.log(
-      `[invoice.paid] billing_reason=${invoice.billing_reason} — renewal, suppressing Meta Purchase`,
-    );
-  }
+  // Fire the CAPI Purchase for the intro charge, but NOT for renewals.
+  // Guard fail-OPEN: a renewal is unambiguously `subscription_cycle`, so we
+  // suppress ONLY that. Every other reason — `subscription_create` and any
+  // first-charge variant (payment retries, off-session/saved-PM, wallet
+  // finalizations, live-mode API quirks) — still counts as an acquisition.
+  //
+  // (A prior fail-CLOSED version whitelisted only `subscription_create` and
+  // silently dropped real intro purchases whose first invoice happened to
+  // carry a different billing_reason — exactly the regression this fixes.)
+  const isRenewal = invoice.billing_reason === "subscription_cycle";
+  console.log(
+    `[invoice.paid] billing_reason=${invoice.billing_reason} renewal=${isRenewal} fireMetaPurchase=${!isRenewal}`,
+  );
   await provisionIntroPayment({
     pi,
     pm,
@@ -266,7 +268,7 @@ async function handleInvoicePaid(
     analysisId,
     plan,
     db,
-    fireMetaPurchase: isIntroInvoice,
+    fireMetaPurchase: !isRenewal,
   });
   // Stamp invoice.amount_paid on the purchase record (PI.amount may be 0
   // on subscription invoices in some Stripe API states). Idempotent: the
