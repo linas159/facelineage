@@ -22,11 +22,31 @@ export async function getOrCreateAuthUser(
   email: string,
 ): Promise<User | null> {
   const lowered = email.toLowerCase();
+  // Resolve via profiles.email first — a single indexed lookup. Falls back
+  // to a paginated auth scan for orphaned auth users with no profiles row.
+  // NOTE: listUsers() defaults to perPage 50, so it MUST be paginated —
+  // an unpaginated call silently misses every user past the first page.
   const findByEmail = async (): Promise<User | null> => {
-    const { data: list } = await db.auth.admin.listUsers();
-    return (
-      list?.users.find((u) => u.email?.toLowerCase() === lowered) ?? null
-    );
+    const { data: profile } = await db
+      .from("profiles")
+      .select("id")
+      .ilike("email", lowered)
+      .maybeSingle();
+    if (profile?.id) {
+      const { data: byId } = await db.auth.admin.getUserById(profile.id);
+      if (byId?.user) return byId.user;
+    }
+
+    for (let page = 1; ; page++) {
+      const { data: list } = await db.auth.admin.listUsers({
+        page,
+        perPage: 1000,
+      });
+      const users = list?.users ?? [];
+      const hit = users.find((u) => u.email?.toLowerCase() === lowered);
+      if (hit) return hit;
+      if (users.length < 1000) return null;
+    }
   };
 
   let user = await findByEmail();
