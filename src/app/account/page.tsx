@@ -5,7 +5,7 @@ import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { PLANS, formatPrice, pickCurrency } from "@/lib/stripe";
 import { getLocale, getDictionary } from "@/lib/i18n/server";
-import { ManagePortalButton, DeleteDataButton } from "./account-actions";
+import { ManagePortalButton } from "./account-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -98,10 +98,9 @@ export default async function AccountPage() {
 
         <Card>
           <CardTitle>Privacy</CardTitle>
-          <CardDescription className="mt-1 mb-4">
-            Your photos are auto-deleted 30 days after upload. You can delete them sooner here.
+          <CardDescription className="mt-1">
+            Your photos are auto-deleted 30 days after upload.
           </CardDescription>
-          <DeleteDataButton />
         </Card>
       </div>
     </FunnelShell>
