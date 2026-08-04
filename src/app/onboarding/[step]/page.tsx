@@ -5,15 +5,15 @@ import { getDictionary, getLocale, localized } from "@/lib/i18n/server";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 
 /**
- * 3-screen onboarding carousel — the feature-flagged alternative to the
- * 6-step quiz (`/quiz/[step]`). Each screen shows a generated visual, a
- * headline + supporting line, paging dots, and a Continue CTA. The final
- * screen's CTA goes straight to photo capture (no quiz in between).
+ * 3-screen onboarding carousel — an alternative to the 6-step quiz
+ * (`/quiz/[step]`). Each screen shows a generated visual, a headline +
+ * supporting line, paging dots, and a Continue CTA. The final screen's CTA
+ * goes straight to photo capture (no quiz in between).
  *
- * Routing between the quiz and this funnel is decided by the `home-funnel`
- * PostHog flag, read in <FunnelCta> on the landing page. The step definitions
- * here are language-agnostic — they reference dictionary keys under
- * `onboarding`. To translate, edit the dictionaries.
+ * Nothing links here anymore — the landing CTA goes straight to the quiz —
+ * but the route stays reachable directly. The step definitions here are
+ * language-agnostic — they reference dictionary keys under `onboarding`.
+ * To translate, edit the dictionaries.
  */
 type Slide = {
   id: number;

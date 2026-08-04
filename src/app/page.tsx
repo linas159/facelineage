@@ -62,11 +62,7 @@ export default async function LandingPage() {
             <p className="mb-4 text-center text-sm leading-snug text-[var(--color-ink-soft)]">
               {dict.landing.heroSubhead}
             </p>
-            <FunnelCta
-              size="block"
-              onboardingHref={l("/onboarding/1")}
-              quizHref={l("/quiz/1")}
-            >
+            <FunnelCta size="block" quizHref={l("/quiz/1")}>
               {dict.landing.heroCta}
             </FunnelCta>
             <p className="mt-2.5 text-center text-[11px] text-[var(--color-ink-muted)]">
@@ -207,7 +203,6 @@ export default async function LandingPage() {
           <FunnelCta
             size="block"
             className="max-w-xs mx-auto"
-            onboardingHref={l("/onboarding/1")}
             quizHref={l("/quiz/1")}
           >
             {dict.landing.ctaButton}
