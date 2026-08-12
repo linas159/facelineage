@@ -10,96 +10,252 @@ const PHOTOS_BUCKET = "analysis-photos";
 const GENERATED_BUCKET = "generated";
 
 /**
+ * A `running` claim older than this is assumed dead — the serverless
+ * invocation that made it was killed, timed out, or crashed without ever
+ * reaching the catch block. Longer than the worst realistic run (Claude with
+ * retries + portrait with retries ≈ 3 min), short enough that a waiting
+ * customer is not stuck for long.
+ */
+const STALE_RUNNING_MS = 8 * 60 * 1000;
+
+/**
+ * Cap on automatic attempts, so a genuinely broken analysis (corrupt photo,
+ * revoked API key) can't spin forever. A manual retry ignores this.
+ */
+const MAX_PIPELINE_ATTEMPTS = 5;
+
+/**
+ * Is this analysis stuck in a state a re-run could fix?
+ *
+ * `failed` and `queued` are obvious. A `running` row whose claim has gone
+ * stale is the subtle one: nothing else will ever pick it up, because the
+ * invocation that claimed it is gone.
+ */
+export function isRecoverable(row: {
+  status: string | null;
+  startedAt: string | null;
+  attempts: number | null;
+}): boolean {
+  if ((row.attempts ?? 0) >= MAX_PIPELINE_ATTEMPTS) return false;
+  if (row.status === "failed" || row.status === "queued") return true;
+  if (row.status === "running") {
+    const startedAt = row.startedAt ? Date.parse(row.startedAt) : 0;
+    return !startedAt || Date.now() - startedAt > STALE_RUNNING_MS;
+  }
+  return false;
+}
+
+type StoredAncestor = {
+  name?: string;
+  era?: string;
+  place?: string;
+  description?: string;
+  image_prompt?: string;
+  image_path?: string | null;
+};
+
+/**
  * Main post-payment pipeline.
  *
- * 1. Loads the analysis row + selfie from storage
- * 2. Marks it as `running`
- * 3. Calls Claude to extract structured analysis (regions, traits, story…)
- * 4. Generates the ancestor portrait + cultural-insight images in parallel
- * 5. Persists everything and flips status to `ready`
+ * 1. Claims the row (reclaiming stale `running` rows left by dead invocations)
+ * 2. Calls Claude for the structured analysis, then persists the text report
+ *    immediately — before touching the image model
+ * 3. Generates and attaches the ancestor portrait
+ * 4. Flips status to `ready`
  *
- * Designed to be called from the Stripe webhook. Errors are caught and
- * recorded on the row so the user sees a "generation failed" state instead
- * of a hung "loading…".
+ * Two properties make this safe to call repeatedly from any entry point
+ * (webhook, /payment-complete, /api/intro-charge, the repair endpoint):
+ *
+ *   - **Resumable.** The text report is persisted the moment it exists, so a
+ *     later failure (or a re-run) never re-pays for the Claude call, and a
+ *     re-run only redoes the step that actually failed.
+ *   - **Degrades instead of failing.** If the portrait can't be generated the
+ *     report still goes `ready` with everything else intact — a paying
+ *     customer gets their report, and the portrait is filled in on a later
+ *     pass. Only a failure that leaves nothing to show marks the row `failed`.
  */
-export async function runMainPipeline(analysisId: string): Promise<void> {
-  console.log(`[pipeline] start analysis=${analysisId}`);
+export async function runMainPipeline(
+  analysisId: string,
+  opts: { force?: boolean } = {},
+): Promise<void> {
+  console.log(`[pipeline] start analysis=${analysisId}${opts.force ? " (forced)" : ""}`);
   const db = createServiceClient();
 
   const { data: row, error } = await db
     .from("analyses")
-    .select("id, user_id, photo_path, generation_status, quiz_answers, timezone, country_hint")
+    .select(
+      "id, user_id, photo_path, generation_status, generation_started_at, generation_attempts, quiz_answers, timezone, country_hint, conclusion, ancestor",
+    )
     .eq("id", analysisId)
     .single();
-  console.log(`[pipeline] loaded row, photo_path=${row?.photo_path ?? "(none)"} status=${row?.generation_status}`);
+  console.log(
+    `[pipeline] loaded row, photo_path=${row?.photo_path ?? "(none)"} status=${row?.generation_status} attempts=${row?.generation_attempts ?? 0}`,
+  );
   if (error || !row) throw new Error(`Analysis ${analysisId} not found: ${error?.message}`);
-  if (!row.photo_path) throw new Error(`Analysis ${analysisId} has no photo_path`);
 
-  if (row.generation_status === "ready" || row.generation_status === "running") {
-    console.log(`[pipeline] already ${row.generation_status} — skipping`);
+  const storedAncestor = (row.ancestor ?? null) as StoredAncestor | null;
+  // The text report is already on the row and only the portrait is missing —
+  // a re-run can skip Claude entirely and just finish the image step.
+  const textAlreadyDone = !!row.conclusion && !!storedAncestor?.image_prompt;
+  const portraitAlreadyDone = !!storedAncestor?.image_path;
+
+  if (row.generation_status === "ready" && portraitAlreadyDone) {
+    console.log(`[pipeline] already ready — skipping`);
     return;
   }
 
-  await db
+  // A live claim from another invocation: leave it alone. A stale one means
+  // that invocation died; take it over.
+  if (row.generation_status === "running") {
+    const startedAt = row.generation_started_at ? Date.parse(row.generation_started_at) : 0;
+    const ageMs = Date.now() - startedAt;
+    if (startedAt && ageMs < STALE_RUNNING_MS) {
+      console.log(`[pipeline] already running (${Math.round(ageMs / 1000)}s ago) — skipping`);
+      return;
+    }
+    console.warn(`[pipeline] reclaiming stale running claim (${Math.round(ageMs / 1000)}s old)`);
+  }
+
+  const attempts = row.generation_attempts ?? 0;
+  if (!opts.force && attempts >= MAX_PIPELINE_ATTEMPTS) {
+    console.error(`[pipeline] attempts exhausted (${attempts}) — not retrying automatically`);
+    return;
+  }
+
+  if (!textAlreadyDone && !row.photo_path) {
+    // Nothing to analyze and nothing already stored — record it rather than
+    // throwing into a void, so support can see why.
+    await db
+      .from("analyses")
+      .update({
+        generation_status: "failed",
+        generation_error: "Source photo is missing — cannot generate the report.",
+      })
+      .eq("id", analysisId);
+    throw new Error(`Analysis ${analysisId} has no photo_path`);
+  }
+
+  // Optimistic lock: `generation_attempts` doubles as a version counter, so
+  // when several entry points fire at once exactly one of them claims the run.
+  const { data: claimed } = await db
     .from("analyses")
-    .update({ generation_status: "running", generation_error: null })
-    .eq("id", analysisId);
-  console.log(`[pipeline] status → running`);
+    .update({
+      generation_status: "running",
+      generation_error: null,
+      generation_started_at: new Date().toISOString(),
+      generation_attempts: attempts + 1,
+    })
+    .eq("id", analysisId)
+    .eq("generation_attempts", attempts)
+    .select("id")
+    .maybeSingle();
+  if (!claimed) {
+    console.log(`[pipeline] lost the claim race — another run is handling this`);
+    return;
+  }
+  console.log(`[pipeline] status → running (attempt ${attempts + 1})`);
 
   try {
-    // 1. Pull selfie bytes
-    const selfie = await downloadFromStorage(db, PHOTOS_BUCKET, row.photo_path);
-    const selfieBase64 = selfie.bytes.toString("base64");
-    console.log(`[pipeline] selfie downloaded, ${selfie.bytes.length} bytes`);
-
-    // 2. Run Claude analysis with quiz + location context
-    console.log(`[pipeline] calling Claude…`);
-    const claudeStart = Date.now();
-    const result = await analyzeFace({
-      imageBase64: selfieBase64,
-      mediaType: selfie.mediaType,
-      context: {
-        timezone: row.timezone ?? null,
-        countryHint: row.country_hint ?? null,
-        quizAnswers: (row.quiz_answers as Record<string, string> | null) ?? null,
-      },
-    });
-    console.log(`[pipeline] Claude done in ${Date.now() - claudeStart}ms, regions=${result.regions.length}`);
-
     const userId = row.user_id ?? "shared";
 
-    // 3. Generate the ancestor portrait. Cultural insights stay text-only
-    // for now (we don't generate per-user images for those — too costly).
-    console.log(`[pipeline] generating ancestor portrait…`);
-    const imgStart = Date.now();
-    const ancestorBytes = await generateImage({
-      prompt: result.ancestor.image_prompt,
-      referenceImageBase64: selfieBase64,
-      referenceMediaType: selfie.mediaType,
-      aspect: "4:5",
-    });
-    console.log(`[pipeline] portrait done in ${Date.now() - imgStart}ms, ${ancestorBytes.length} bytes`);
+    // 1. Pull selfie bytes. Only strictly needed when we still have to run
+    // Claude; for a portrait-only repair it's a nice-to-have reference image.
+    let selfie: { bytes: Buffer; mediaType: "image/jpeg" | "image/png" | "image/webp" } | null =
+      null;
+    if (row.photo_path) {
+      try {
+        selfie = await downloadFromStorage(db, PHOTOS_BUCKET, row.photo_path);
+        console.log(`[pipeline] selfie downloaded, ${selfie.bytes.length} bytes`);
+      } catch (err) {
+        if (!textAlreadyDone) throw err;
+        console.warn(
+          `[pipeline] selfie unavailable for portrait repair: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
-    // 4. Upload the portrait to private storage; we sign URLs at read time.
-    console.log(`[pipeline] uploading portrait…`);
-    const ancestorPath = await uploadGenerated(
-      db,
-      `${userId}/${analysisId}/ancestor-${randomUUID()}.png`,
-      ancestorBytes,
-    );
-    console.log(`[pipeline] portrait uploaded → ${ancestorPath}`);
+    // 2. Run Claude analysis with quiz + location context, then persist the
+    // text report straight away so it survives any later failure.
+    let ancestorPrompt: string;
+    if (textAlreadyDone) {
+      console.log(`[pipeline] text report already persisted — resuming at the portrait step`);
+      ancestorPrompt = storedAncestor!.image_prompt!;
+    } else {
+      if (!selfie) throw new Error(`Analysis ${analysisId} has no readable selfie`);
+      console.log(`[pipeline] calling Claude…`);
+      const claudeStart = Date.now();
+      const result = await analyzeFace({
+        imageBase64: selfie.bytes.toString("base64"),
+        mediaType: selfie.mediaType,
+        context: {
+          timezone: row.timezone ?? null,
+          countryHint: row.country_hint ?? null,
+          quizAnswers: (row.quiz_answers as Record<string, string> | null) ?? null,
+        },
+      });
+      console.log(
+        `[pipeline] Claude done in ${Date.now() - claudeStart}ms, regions=${result.regions.length}`,
+      );
 
-    const insightsWithPaths = result.cultural_insights.map((ci) => ({
-      ...ci,
-      image_path: null,
-    }));
+      console.log(`[pipeline] persisting text report…`);
+      const { error: textErr } = await db
+        .from("analyses")
+        .update({
+          conclusion: result.conclusion,
+          regions: result.regions,
+          facial_traits: result.facial_traits,
+          // Cultural insights stay text-only for now (per-user images for
+          // those would be too costly).
+          cultural_insights: result.cultural_insights.map((ci) => ({ ...ci, image_path: null })),
+          heritage_story: result.heritage_story,
+          ancestor: { ...result.ancestor, image_path: null },
+          uniqueness_score_v2: result.uniqueness_score,
+        })
+        .eq("id", analysisId);
+      if (textErr) throw textErr;
+      ancestorPrompt = result.ancestor.image_prompt;
+    }
 
-    const persistAncestor = {
-      ...result.ancestor,
-      image_path: ancestorPath,
+    // 3. Ancestor portrait. Non-fatal: a report without the generated
+    // portrait is still a report (the loader falls back to a stock image),
+    // and a later pass can fill it in.
+    let ancestorPath: string | null = null;
+    let portraitError: string | null = null;
+    try {
+      console.log(`[pipeline] generating ancestor portrait…`);
+      const imgStart = Date.now();
+      const ancestorBytes = await generateImage({
+        prompt: ancestorPrompt,
+        referenceImageBase64: selfie?.bytes.toString("base64"),
+        referenceMediaType: selfie?.mediaType,
+        aspect: "4:5",
+      });
+      console.log(`[pipeline] portrait done in ${Date.now() - imgStart}ms, ${ancestorBytes.length} bytes`);
+
+      ancestorPath = await uploadGenerated(
+        db,
+        `${userId}/${analysisId}/ancestor-${randomUUID()}.png`,
+        ancestorBytes,
+      );
+      console.log(`[pipeline] portrait uploaded → ${ancestorPath}`);
+    } catch (err) {
+      portraitError = err instanceof Error ? err.message : String(err);
+      console.error(`[pipeline] portrait generation failed (non-fatal): ${portraitError}`);
+    }
+
+    // 4. Finalize. Re-read the ancestor block so we patch whatever is
+    // currently stored rather than clobbering it.
+    const { data: fresh } = await db
+      .from("analyses")
+      .select("ancestor")
+      .eq("id", analysisId)
+      .maybeSingle();
+    const finalAncestor = {
+      ...((fresh?.ancestor ?? {}) as StoredAncestor),
+      image_path: ancestorPath ?? ((fresh?.ancestor ?? {}) as StoredAncestor).image_path ?? null,
     };
 
-    console.log(`[pipeline] persisting analysis row…`);
+    console.log(`[pipeline] finalizing analysis row…`);
     const { error: upErr } = await db
       .from("analyses")
       .update({
@@ -107,18 +263,17 @@ export async function runMainPipeline(analysisId: string): Promise<void> {
         status: "ready",
         is_paid: true,
         completed_at: new Date().toISOString(),
-        conclusion: result.conclusion,
-        regions: result.regions,
-        facial_traits: result.facial_traits,
-        cultural_insights: insightsWithPaths,
-        heritage_story: result.heritage_story,
-        ancestor: persistAncestor,
-        uniqueness_score_v2: result.uniqueness_score,
+        ancestor: finalAncestor,
+        // Surfaced only in logs/support tooling — a `ready` report never
+        // renders this to the customer.
+        generation_error: portraitError ? `portrait: ${portraitError}` : null,
       })
       .eq("id", analysisId);
 
     if (upErr) throw upErr;
-    console.log(`[pipeline] DONE analysis=${analysisId}`);
+    console.log(
+      `[pipeline] DONE analysis=${analysisId}${portraitError ? " (portrait pending retry)" : ""}`,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[pipeline] FAILED analysis=${analysisId}: ${message}`);

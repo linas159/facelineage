@@ -349,6 +349,8 @@ export const pl: Dictionary = {
     usuallyMinute: "Zwykle zajmuje to minutę. Możesz zostawić tę kartę otwartą.",
     failedTitle: "Coś poszło nie tak",
     failedBody: "Nie udało się dokończyć Twojego raportu. Skontaktuj się z pomocą — Twój zakup jest zapisany.",
+    failedRetry: "Spróbuj ponownie",
+    failedRetrying: "Wracamy do miejsca, w którym skończyliśmy…",
     phaseReading: "Odczytujemy Twoje selfie",
     phaseMapping: "Mapujemy regiony przodków",
     phaseStory: "Tworzymy historię Twojego dziedzictwa",

@@ -365,6 +365,8 @@ export const ro: Dictionary = {
     usuallyMinute: "De obicei durează un minut. Poți lăsa tab-ul deschis.",
     failedTitle: "Ceva nu a funcționat",
     failedBody: "Nu am putut finaliza raportul tău. Te rugăm să contactezi suportul — achiziția ta este înregistrată.",
+    failedRetry: "Încearcă din nou",
+    failedRetrying: "Reluăm de unde am rămas…",
     phaseReading: "Citim selfie-ul tău",
     phaseMapping: "Cartografiem regiunile ancestrale",
     phaseStory: "Compunem povestea moștenirii tale",

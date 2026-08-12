@@ -228,20 +228,120 @@ export type AnalyzeContext = {
 };
 
 /**
+ * Output budget for the analysis call.
+ *
+ * A full report (3 regions × 4-8 countries, 6 traits, 3 cultural insights,
+ * a 2-paragraph story and the ancestor block) measures ~2.5k output tokens
+ * on an average selfie and comfortably exceeds 4k on a verbose one. When the
+ * budget is hit the API returns `stop_reason: "max_tokens"` and a *partially
+ * parsed* tool_use input — the tail fields (`heritage_story`, `ancestor`,
+ * `uniqueness_score`) are simply absent, which is what used to surface as
+ * "Cannot read properties of undefined (reading 'image_prompt')".
+ *
+ * Haiku 4.5 allows up to 64k output tokens; 16k keeps us far clear of the
+ * ceiling while staying under the SDK's non-streaming HTTP timeout. We only
+ * pay for tokens actually generated, so the headroom is free.
+ */
+const MAX_OUTPUT_TOKENS = 16000;
+
+/** How many times to re-run a truncated / malformed / transient-failure call. */
+const MAX_ANALYSIS_ATTEMPTS = 4;
+
+/** Thrown when a response is unusable but a fresh attempt is likely to work. */
+class RetryableAnalysisError extends Error {
+  /** Which fields were missing/invalid, so the retry can ask for them by name. */
+  readonly problems: string[];
+  /** True when the response ran out of output budget rather than omitting fields. */
+  readonly truncated: boolean;
+
+  constructor(message: string, opts: { problems?: string[]; truncated?: boolean } = {}) {
+    super(message);
+    this.name = "RetryableAnalysisError";
+    this.problems = opts.problems ?? [];
+    this.truncated = opts.truncated ?? false;
+  }
+}
+
+/**
+ * Feedback carried into the next attempt.
+ *
+ * Retrying blind is weak here, because the two failure modes have different
+ * fixes: a truncated response needs *less* prose, while an omitted field needs
+ * that specific field. Naming the problem turns the retry into a repair.
+ */
+function retryNudge(prev: RetryableAnalysisError | null): string {
+  if (!prev) return "";
+  const parts = ["\n\nYour previous attempt did not produce a usable report."];
+  if (prev.truncated) {
+    parts.push(
+      "It ran out of response budget before finishing. Keep every description to at most two sentences and heritage_story to two short paragraphs.",
+    );
+  }
+  if (prev.problems.length > 0) {
+    parts.push(
+      `These required fields were missing or invalid: ${prev.problems.join(", ")}.`,
+    );
+  }
+  parts.push(
+    "Every property in the report_analysis schema is required. Fill in all of them — conclusion, regions (each with countries), facial_traits, cultural_insights, heritage_story, ancestor (including image_prompt) and uniqueness_score — before ending your response.",
+  );
+  return parts.join(" ");
+}
+
+/**
  * Run the full heritage analysis on a selfie. Returns a structured report
  * matching the database schema in lib/report-data.ts.
+ *
+ * Every response is validated before it is returned, so callers can rely on
+ * the whole `AnalysisResult` shape being present. Truncated, malformed, and
+ * transiently-failed calls are retried with backoff.
  */
 export async function analyzeFace(opts: {
   imageBase64: string;
   mediaType: "image/jpeg" | "image/png" | "image/webp";
   context?: AnalyzeContext;
 }): Promise<AnalysisResult> {
+  let lastError: unknown;
+  let lastAnalysisError: RetryableAnalysisError | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ANALYSIS_ATTEMPTS; attempt++) {
+    try {
+      return await analyzeFaceOnce(opts, attempt, lastAnalysisError);
+    } catch (err) {
+      lastError = err;
+      lastAnalysisError = err instanceof RetryableAnalysisError ? err : null;
+      const message = err instanceof Error ? err.message : String(err);
+      if (!isRetryable(err) || attempt === MAX_ANALYSIS_ATTEMPTS) {
+        console.error(`[claude] analyze attempt ${attempt} failed (final): ${message}`);
+        throw err;
+      }
+      console.warn(`[claude] analyze attempt ${attempt} failed, retrying: ${message}`);
+      await sleep(1000 * attempt);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function analyzeFaceOnce(
+  opts: {
+    imageBase64: string;
+    mediaType: "image/jpeg" | "image/png" | "image/webp";
+    context?: AnalyzeContext;
+  },
+  attempt: number,
+  previousFailure: RetryableAnalysisError | null,
+): Promise<AnalysisResult> {
   const c = client();
   const contextBlock = formatContext(opts.context);
 
+  // Repair instructions for a retry. This lives in the user turn (after the
+  // cached system + tool prefix) so prompt caching is unaffected.
+  const nudge = retryNudge(previousFailure);
+
   const resp = await c.messages.create({
     model: "claude-haiku-4-5",
-    max_tokens: 4096,
+    max_tokens: MAX_OUTPUT_TOKENS,
     // Cache the static system prompt + tool schema so re-runs are cheap.
     system: [
       {
@@ -272,18 +372,135 @@ export async function analyzeFace(opts: {
           {
             type: "text",
             text:
-              `Analyze this selfie following the instructions in the system message, then call report_analysis with the structured result. The face is the primary input — the side context below is only a soft prior.\n\n${contextBlock}`,
+              `Analyze this selfie following the instructions in the system message, then call report_analysis with the structured result. The face is the primary input — the side context below is only a soft prior.\n\n${contextBlock}${nudge}`,
           },
         ],
       },
     ],
   });
 
+  console.log(
+    `[claude] analyze attempt=${attempt} stop_reason=${resp.stop_reason} output_tokens=${resp.usage.output_tokens}/${MAX_OUTPUT_TOKENS}`,
+  );
+
+  // A truncated response still carries a tool_use block, but its `input` is
+  // only partially parsed — trailing fields are silently missing. Catch it
+  // here rather than letting the caller trip over an undefined field.
+  if (resp.stop_reason === "max_tokens") {
+    throw new RetryableAnalysisError(
+      `Response truncated at max_tokens (${resp.usage.output_tokens} output tokens) — result is incomplete`,
+      { truncated: true },
+    );
+  }
+
   const toolUse = resp.content.find((b) => b.type === "tool_use");
   if (!toolUse || toolUse.type !== "tool_use") {
-    throw new Error("Claude did not return a tool_use block");
+    throw new RetryableAnalysisError(
+      `Claude did not return a tool_use block (stop_reason=${resp.stop_reason})`,
+    );
   }
-  return toolUse.input as AnalysisResult;
+
+  return validateAnalysis(toolUse.input);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Validation — the pipeline reads every field below, so a response missing any
+// of them is unusable. Checks are deliberately shape-only: we reject responses
+// that would crash or render blank, not ones that merely deviate from the
+// prompt's guidance (e.g. 2 regions instead of 3 still produces a fine report).
+// ────────────────────────────────────────────────────────────────────────────
+
+function validateAnalysis(raw: unknown): AnalysisResult {
+  const problems: string[] = [];
+  const r = (raw ?? {}) as Record<string, unknown>;
+
+  const str = (v: unknown) => typeof v === "string" && v.trim().length > 0;
+  const num = (v: unknown) => typeof v === "number" && Number.isFinite(v);
+
+  if (!str(r.conclusion)) problems.push("conclusion");
+  if (!str(r.heritage_story)) problems.push("heritage_story");
+  if (!num(r.uniqueness_score)) problems.push("uniqueness_score");
+
+  const regions = r.regions;
+  if (!Array.isArray(regions) || regions.length === 0) {
+    problems.push("regions");
+  } else {
+    regions.forEach((region, i) => {
+      const g = (region ?? {}) as Record<string, unknown>;
+      if (!str(g.key) || !str(g.name) || !str(g.color) || !num(g.pct)) {
+        problems.push(`regions[${i}]`);
+      }
+      if (!Array.isArray(g.countries) || g.countries.length === 0) {
+        problems.push(`regions[${i}].countries`);
+        return;
+      }
+      g.countries.forEach((country, j) => {
+        const co = (country ?? {}) as Record<string, unknown>;
+        if (!str(co.name) || !str(co.iso2) || !num(co.pct) || !num(co.lat) || !num(co.lng)) {
+          problems.push(`regions[${i}].countries[${j}]`);
+        }
+      });
+    });
+  }
+
+  const traits = r.facial_traits;
+  if (!Array.isArray(traits) || traits.length === 0) {
+    problems.push("facial_traits");
+  } else {
+    traits.forEach((trait, i) => {
+      const t = (trait ?? {}) as Record<string, unknown>;
+      if (!str(t.key) || !str(t.name) || !str(t.description)) problems.push(`facial_traits[${i}]`);
+    });
+  }
+
+  const insights = r.cultural_insights;
+  if (!Array.isArray(insights) || insights.length === 0) {
+    problems.push("cultural_insights");
+  } else {
+    insights.forEach((insight, i) => {
+      const ci = (insight ?? {}) as Record<string, unknown>;
+      if (!str(ci.key) || !str(ci.name) || !str(ci.description)) {
+        problems.push(`cultural_insights[${i}]`);
+      }
+    });
+  }
+
+  // The ancestor block drives the portrait prompt — this is the field whose
+  // absence used to crash the pipeline.
+  const ancestor = (r.ancestor ?? {}) as Record<string, unknown>;
+  if (!r.ancestor || typeof r.ancestor !== "object") {
+    problems.push("ancestor");
+  } else {
+    for (const field of ["name", "era", "place", "description", "image_prompt"] as const) {
+      if (!str(ancestor[field])) problems.push(`ancestor.${field}`);
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new RetryableAnalysisError(
+      `Analysis payload incomplete — missing/invalid: ${problems.slice(0, 12).join(", ")}${
+        problems.length > 12 ? ` (+${problems.length - 12} more)` : ""
+      }`,
+      { problems: problems.slice(0, 12) },
+    );
+  }
+
+  return raw as AnalysisResult;
+}
+
+/** Transient failures worth another attempt: truncation, bad shape, 429/5xx, network. */
+function isRetryable(err: unknown): boolean {
+  if (err instanceof RetryableAnalysisError) return true;
+  if (err instanceof Anthropic.APIConnectionError) return true;
+  if (err instanceof Anthropic.APIError) {
+    const status = err.status ?? 0;
+    return status === 408 || status === 409 || status === 429 || status >= 500;
+  }
+  return false;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -331,10 +548,36 @@ export async function compareParents(opts: {
   fatherImageBase64: string;
   fatherMediaType: "image/jpeg" | "image/png" | "image/webp";
 }): Promise<ParentsComparison> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ANALYSIS_ATTEMPTS; attempt++) {
+    try {
+      return await compareParentsOnce(opts);
+    } catch (err) {
+      lastError = err;
+      const message = err instanceof Error ? err.message : String(err);
+      if (!isRetryable(err) || attempt === MAX_ANALYSIS_ATTEMPTS) {
+        console.error(`[claude] parents attempt ${attempt} failed (final): ${message}`);
+        throw err;
+      }
+      console.warn(`[claude] parents attempt ${attempt} failed, retrying: ${message}`);
+      await sleep(1000 * attempt);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function compareParentsOnce(opts: {
+  userImageBase64: string;
+  userMediaType: "image/jpeg" | "image/png" | "image/webp";
+  motherImageBase64: string;
+  motherMediaType: "image/jpeg" | "image/png" | "image/webp";
+  fatherImageBase64: string;
+  fatherMediaType: "image/jpeg" | "image/png" | "image/webp";
+}): Promise<ParentsComparison> {
   const c = client();
   const resp = await c.messages.create({
     model: "claude-haiku-4-5",
-    max_tokens: 1024,
+    max_tokens: 4096,
     system: [{ type: "text", text: PARENTS_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     tools: [{ ...PARENTS_TOOL, cache_control: { type: "ephemeral" } }] as never,
     tool_choice: { type: "tool", name: "parents_comparison" },
@@ -353,8 +596,22 @@ export async function compareParents(opts: {
       },
     ],
   });
+  if (resp.stop_reason === "max_tokens") {
+    throw new RetryableAnalysisError("Parents comparison truncated at max_tokens");
+  }
   const toolUse = resp.content.find((b) => b.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use") throw new Error("Claude did not return parents tool_use");
+  if (!toolUse || toolUse.type !== "tool_use") {
+    throw new RetryableAnalysisError(
+      `Claude did not return parents tool_use (stop_reason=${resp.stop_reason})`,
+    );
+  }
+  const out = (toolUse.input ?? {}) as Record<string, unknown>;
+  const missing = (["breakdown", "mother_traits", "father_traits"] as const).filter(
+    (k) => typeof out[k] !== "string" || (out[k] as string).trim().length === 0,
+  );
+  if (missing.length > 0) {
+    throw new RetryableAnalysisError(`Parents comparison missing: ${missing.join(", ")}`);
+  }
   return toolUse.input as ParentsComparison;
 }
 

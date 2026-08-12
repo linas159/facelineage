@@ -31,15 +31,54 @@ export type GenerateOptions = {
   aspect?: AspectRatio;
 };
 
+/** How many times to re-run a failed generation before giving up. */
+const MAX_IMAGE_ATTEMPTS = 3;
+
 /**
  * Generate an image. Returns the raw bytes, ready to upload to Supabase
  * Storage. Caller is responsible for storing + persisting the path.
+ *
+ * Image models fail transiently more often than text ones — safety filters
+ * trip on perfectly ordinary faces, quota blips return 429/5xx, and Google
+ * occasionally returns a candidate with no inline data at all. Each of those
+ * usually clears on a re-run, so we retry with backoff. If a Google direct
+ * key is configured and every attempt fails, we fall back to Replicate when
+ * that token is also present, so one provider having a bad minute doesn't
+ * fail the whole report.
  */
 export async function generateImage(opts: GenerateOptions): Promise<Buffer> {
-  if (process.env.GOOGLE_AI_API_KEY) {
-    return generateViaGoogle(opts);
+  const useGoogle = !!process.env.GOOGLE_AI_API_KEY;
+  const primary = useGoogle ? generateViaGoogle : generateViaReplicate;
+
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_IMAGE_ATTEMPTS; attempt++) {
+    try {
+      return await primary(opts);
+    } catch (err) {
+      lastError = err;
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[image-gen] attempt ${attempt}/${MAX_IMAGE_ATTEMPTS} failed: ${message}`);
+      if (attempt < MAX_IMAGE_ATTEMPTS) await sleep(1000 * attempt);
+    }
   }
-  return generateViaReplicate(opts);
+
+  // Cross-provider fallback — only possible when both backends are configured.
+  if (useGoogle && process.env.REPLICATE_API_TOKEN) {
+    console.warn("[image-gen] Google exhausted, falling back to Replicate");
+    try {
+      return await generateViaReplicate(opts);
+    } catch (err) {
+      console.error(
+        `[image-gen] Replicate fallback failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ────────────────────────────────────────────────────────────────────────────

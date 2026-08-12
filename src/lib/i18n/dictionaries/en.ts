@@ -361,6 +361,8 @@ export const en = {
     usuallyMinute: "This usually takes a minute. Feel free to keep this tab open.",
     failedTitle: "Something went wrong",
     failedBody: "We couldn't finish your report. Please contact support — your purchase is on file.",
+    failedRetry: "Try again",
+    failedRetrying: "Picking up where we left off…",
     // Phase labels rotated under the spinner.
     phaseReading: "Reading your selfie",
     phaseMapping: "Mapping ancestral regions",

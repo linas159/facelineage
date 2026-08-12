@@ -146,15 +146,32 @@ export async function provisionIntroPayment(opts: {
     console.error("[provisioning] sibling cancel failed:", err);
   }
 
-  // 5. Mark analysis paid + queued (idempotent).
+  // 5. Mark analysis paid + owned (idempotent, safe to repeat).
   await db
     .from("analyses")
     .update({
       user_id: opts.userId,
       is_paid: true,
-      generation_status: "queued",
     })
     .eq("id", opts.analysisId);
+
+  // Queue generation — but ONLY when there is nothing finished to protect.
+  //
+  // This function is deliberately called from several entry points (the
+  // `invoice.paid` webhook, /payment-complete, /api/intro-charge) and Stripe
+  // retries webhooks, so it runs many times per customer — including on every
+  // subscription renewal. An unconditional reset to `queued` therefore takes a
+  // finished report away from the customer: the report page renders the
+  // "composing…" spinner and report-loader returns a blank report for any
+  // status other than `ready`. That is what "report generation stopped
+  // working" looks like from the outside, for a report that already exists.
+  await db
+    .from("analyses")
+    .update({ generation_status: "queued" })
+    .eq("id", opts.analysisId)
+    // Null-safe allowlist: `.not(...in...)` would skip NULL rows, since
+    // NOT (NULL IN (...)) is NULL rather than true.
+    .or("generation_status.is.null,generation_status.in.(idle,queued,failed)");
 
   // 6. Fire the AI pipeline + the report-ready email post-response. Both
   // are individually deduped — runMainPipeline skips if status is
@@ -178,6 +195,21 @@ export async function provisionIntroPayment(opts: {
         err,
       );
       return; // Don't email a broken report.
+    }
+
+    // The pipeline also returns without throwing when it declines the run
+    // (another invocation holds the claim, or the attempt budget is spent),
+    // so confirm the report is actually ready before promising it by email.
+    const { data: finished } = await db
+      .from("analyses")
+      .select("generation_status")
+      .eq("id", opts.analysisId)
+      .maybeSingle();
+    if (finished?.generation_status !== "ready") {
+      console.log(
+        `[provisioning] report not ready (status=${finished?.generation_status ?? "unknown"}) — skipping email`,
+      );
+      return;
     }
 
     // Atomic check-and-set: only the first caller to claim the timestamp

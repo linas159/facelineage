@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { useI18n } from "@/lib/i18n/client";
 
@@ -35,14 +36,25 @@ export function GeneratingState({ analysisId, initialStatus, initialError, onRea
   const [status, setStatus] = useState<string>(initialStatus);
   const [error, setError] = useState<string | undefined>(initialError);
   const [phaseIdx, setPhaseIdx] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+
+  const retry = async () => {
+    setRetrying(true);
+    try {
+      await fetch(`/api/report-retry/${analysisId}`, { method: "POST" });
+      setError(undefined);
+      // Flipping out of `failed` restarts the polling effect below.
+      setStatus("running");
+    } catch {
+      setRetrying(false);
+    }
+  };
 
   useEffect(() => {
-    if (status === "failed") return;
-    const phaseTimer = setInterval(() => {
-      setPhaseIdx((i) => (i + 1) % PHASES.length);
-    }, 3000);
-
     let cancelled = false;
+    const timers: ReturnType<typeof setInterval>[] = [];
+    const stop = () => timers.forEach(clearInterval);
+
     const poll = async () => {
       try {
         const r = await fetch(`/api/report-status/${analysisId}`, { cache: "no-store" });
@@ -51,21 +63,37 @@ export function GeneratingState({ analysisId, initialStatus, initialError, onRea
         if (cancelled) return;
         setStatus(j.status);
         if (j.error) setError(j.error);
+        // Re-enable the retry button if this attempt failed too.
+        if (j.status === "failed") setRetrying(false);
         if (j.status === "ready") {
-          clearInterval(pollTimer);
-          clearInterval(phaseTimer);
+          stop();
           if (onReady) onReady();
           else router.refresh();
         }
       } catch {}
     };
 
-    const pollTimer = setInterval(poll, 4000);
+    // A `failed` status still gets one probe on mount: the status endpoint
+    // re-fires the pipeline when the analysis is recoverable and answers
+    // `running`, which re-runs this effect on the normal polling cadence.
+    // If it answers `failed` again the state is unchanged, so we settle here
+    // and the customer gets the retry button.
+    if (status === "failed") {
+      poll();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    timers.push(
+      setInterval(() => setPhaseIdx((i) => (i + 1) % PHASES.length), 3000),
+      setInterval(poll, 4000),
+    );
     poll();
+
     return () => {
       cancelled = true;
-      clearInterval(pollTimer);
-      clearInterval(phaseTimer);
+      stop();
     };
   }, [analysisId, status, router, onReady]);
 
@@ -73,9 +101,12 @@ export function GeneratingState({ analysisId, initialStatus, initialError, onRea
     return (
       <Card className="mt-8 text-center">
         <CardTitle className="mb-2">{t.report.failedTitle}</CardTitle>
-        <CardDescription>
+        <CardDescription className="mb-4">
           {error ?? t.report.failedBody}
         </CardDescription>
+        <Button onClick={retry} disabled={retrying}>
+          {retrying ? t.report.failedRetrying : t.report.failedRetry}
+        </Button>
       </Card>
     );
   }
