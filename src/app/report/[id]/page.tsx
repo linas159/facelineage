@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FunnelShell } from "@/components/funnel-shell";
-import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { EthnicityExplorer } from "@/components/report/ethnicity-explorer";
 import { GeneratingFlow } from "@/components/report/generating-flow";
+import { ReportActions } from "@/components/report/report-actions";
 import type { UpsellId } from "@/components/upsell-sections";
 import { loadReport } from "@/lib/report-loader";
 import type { UpsellSku } from "@/lib/report-loader";
@@ -226,13 +225,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
       </Card>
 
       {/* ─────────── SHARE / DOWNLOAD ─────────── */}
-      <div className="mt-8 flex flex-col gap-3">
-        <Button size="block">Share my result</Button>
-        <Button size="block" variant="secondary">Download PDF</Button>
-        <Link href="/dashboard">
-          <Button size="block" variant="ghost">Back to my reports</Button>
-        </Link>
-      </div>
+      <ReportActions analysisId={id} />
 
     </FunnelShell>
   );

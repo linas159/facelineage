@@ -69,8 +69,19 @@ export type ReportData = {
   errorMessage?: string;
 };
 
+export type LoadReportOptions = {
+  /** Read the analysis row with the service client instead of the caller's
+   *  session. Only for contexts that have already authorized the read by
+   *  other means — today that's the public share page, where possession of
+   *  the share token IS the credential. */
+  bypassRls?: boolean;
+};
+
 /** Returns the data needed to render the report page for a given analysis id. */
-export async function loadReport(analysisId: string): Promise<ReportData> {
+export async function loadReport(
+  analysisId: string,
+  { bypassRls = false }: LoadReportOptions = {},
+): Promise<ReportData> {
   if (analysisId === "demo") {
     return {
       status: "demo",
@@ -87,7 +98,7 @@ export async function loadReport(analysisId: string): Promise<ReportData> {
     };
   }
 
-  const sb = await createClient();
+  const sb = bypassRls ? createServiceClient() : await createClient();
   const { data: row } = await sb
     .from("analyses")
     .select(
