@@ -11,6 +11,7 @@ import {
 import { createServiceClient } from "@/lib/supabase/server";
 import { runMainPipeline } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
+import { capturePaymentEvidence } from "@/lib/prevent/evidence";
 import { sendReportReadyEmail } from "@/lib/email/send";
 import { metaEventId, sendMetaEvent } from "@/lib/meta/capi";
 
@@ -91,6 +92,19 @@ export async function provisionIntroPayment(opts: {
     stripe_payment_intent: opts.pi.id,
     amount_cents: opts.pi.amount,
     currency: opts.pi.currency,
+  });
+
+  // 3b. Stamp the card-network identifiers and Compelling Evidence data onto
+  // that row, for Visa Order Insight / Mastercard Clarity lookups. Must run
+  // after recordPurchase (it updates by PaymentIntent id) and before the
+  // response, so a lookup arriving minutes later already has something to
+  // match on. Never throws — see capturePaymentEvidence.
+  await capturePaymentEvidence({
+    db,
+    pi: opts.pi,
+    email: opts.email,
+    // Browser context was stashed on the subscription at /api/checkout time.
+    metadata: opts.subscription.metadata ?? undefined,
   });
 
   // CAPI Purchase. Multiple callers can race here (webhook + /payment-complete

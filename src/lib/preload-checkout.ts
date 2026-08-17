@@ -6,6 +6,8 @@
  * mount and skips the fetch when fresh.
  */
 
+import { getDeviceContext, type DeviceContext } from "@/lib/device";
+
 const PRELOAD_TTL_MS = 30 * 60 * 1000; // 30 min — well under Stripe PI expiry
 
 type Plan = string;
@@ -50,10 +52,27 @@ export function preloadCheckoutInit(
       const cached = readCheckoutInit(plan, analysisId);
       if (cached) return cached;
 
+      // Device id + fingerprint are Compelling Evidence identifiers for
+      // Visa Order Insight; they can only be read in the browser, so they
+      // ride along with the checkout call and get stamped onto the
+      // subscription metadata server-side. Never let this block checkout.
+      let device: DeviceContext = {};
+      try {
+        device = await getDeviceContext();
+      } catch {
+        /* storage or crypto.subtle unavailable — proceed without it */
+      }
+
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ plan, analysisId, locale }),
+        body: JSON.stringify({
+          plan,
+          analysisId,
+          locale,
+          deviceId: device.deviceId,
+          deviceFingerprint: device.deviceFingerprint,
+        }),
       });
       if (!res.ok) return null;
       const data = (await res.json()) as CheckoutInitCached;

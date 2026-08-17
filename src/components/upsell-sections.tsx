@@ -16,6 +16,7 @@ import {
   type Currency,
 } from "@/lib/stripe";
 import { capture } from "@/lib/posthog/client";
+import { getDeviceContext, type DeviceContext } from "@/lib/device";
 
 export type UpsellId =
   | "parents"
@@ -582,12 +583,27 @@ async function chargeUpsell(
   locale: string,
   t: Dictionary,
 ): Promise<ChargeResult> {
+  // Compelling Evidence identifiers for Visa OI / MC Clarity. Best-effort:
+  // an upsell must never fail because storage or crypto.subtle is blocked.
+  let device: DeviceContext = {};
+  try {
+    device = await getDeviceContext();
+  } catch {
+    /* proceed without it */
+  }
+
   let res: Response;
   try {
     res = await fetch("/api/upsell-charge", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ upsell, analysisId, locale }),
+      body: JSON.stringify({
+        upsell,
+        analysisId,
+        locale,
+        deviceId: device.deviceId,
+        deviceFingerprint: device.deviceFingerprint,
+      }),
     });
   } catch {
     return t.upsells.networkError;

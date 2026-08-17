@@ -34,10 +34,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
   }
 
-  const { plan, analysisId, locale: bodyLocale } = (await req.json()) as {
+  const {
+    plan,
+    analysisId,
+    locale: bodyLocale,
+    deviceId,
+    deviceFingerprint,
+  } = (await req.json()) as {
     plan: PlanKey;
     analysisId?: string;
     locale?: string;
+    /** Compelling Evidence identifiers read in the browser — see @/lib/device. */
+    deviceId?: string;
+    deviceFingerprint?: string;
   };
   const planMeta = PLANS[plan];
   if (!planMeta) return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
@@ -114,6 +123,12 @@ export async function POST(req: NextRequest) {
     baseMetadata.meta_ua = ctxEarly.userAgent.slice(0, 500);
   }
   if (ctxEarly.ipAddress) baseMetadata.meta_ip = ctxEarly.ipAddress;
+  // Dispute prevention (Visa OI / MC Clarity): the browser-side half of the
+  // Compelling Evidence identifiers. Stashed here for the same reason as the
+  // Pixel context — the webhook that writes the purchase row has no browser
+  // of its own. Length-capped to the tightest limit either scheme allows.
+  if (deviceId) baseMetadata.device_id = deviceId.slice(0, 40);
+  if (deviceFingerprint) baseMetadata.device_fp = deviceFingerprint.slice(0, 45);
 
   const baseSubParams: Omit<Stripe.SubscriptionCreateParams, "payment_settings" | "metadata"> = {
     customer: customer.id,

@@ -31,10 +31,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
   }
 
-  const { upsell, analysisId, locale: bodyLocale } = (await req.json()) as {
+  const {
+    upsell,
+    analysisId,
+    locale: bodyLocale,
+    deviceId,
+    deviceFingerprint,
+  } = (await req.json()) as {
     upsell: keyof typeof UPSELL_SKU_BY_UI_ID;
     analysisId?: string;
     locale?: string;
+    /** Compelling Evidence identifiers read in the browser — see @/lib/device. */
+    deviceId?: string;
+    deviceFingerprint?: string;
   };
 
   const sku = UPSELL_SKU_BY_UI_ID[upsell];
@@ -150,6 +159,10 @@ export async function POST(req: NextRequest) {
   if (ctx.fbc) piMetadata.meta_fbc = ctx.fbc;
   if (ctx.userAgent) piMetadata.meta_ua = ctx.userAgent.slice(0, 500);
   if (ctx.ipAddress) piMetadata.meta_ip = ctx.ipAddress;
+  // Dispute prevention (Visa OI / MC Clarity) — see /api/checkout for why
+  // these ride on metadata rather than being read at webhook time.
+  if (deviceId) piMetadata.device_id = deviceId.slice(0, 40);
+  if (deviceFingerprint) piMetadata.device_fp = deviceFingerprint.slice(0, 45);
 
   // Create the PI with the saved PM attached but DON'T confirm it. The
   // client confirms on-session via stripe.confirmPayment so Stripe.js can

@@ -5,6 +5,7 @@ import { stripe, PLANS, resolveCustomerEmail, type PlanKey } from "@/lib/stripe"
 import { createServiceClient } from "@/lib/supabase/server";
 import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
+import { capturePaymentEvidence, captureRefund } from "@/lib/prevent/evidence";
 import { provisionIntroPayment } from "@/lib/provisioning";
 import { getOrCreateAuthUser } from "@/lib/auth-user";
 
@@ -24,6 +25,8 @@ export const maxDuration = 300;
  *      ↳ kind=upsell      → record purchase, fire upsell pipeline
  *  - customer.subscription.updated/created/deleted → mirror state
  *  - invoice.payment_failed → past_due
+ *  - charge.refunded → mirror refund onto the purchase (dispute-prevention
+ *    lookups read it back; see @/lib/prevent)
  */
 export async function POST(req: NextRequest) {
   if (!stripe) return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
@@ -73,6 +76,23 @@ export async function POST(req: NextRequest) {
           .from("subscriptions")
           .update({ status: "canceled", canceled_at: new Date().toISOString() })
           .eq("stripe_subscription_id", sub.id);
+        break;
+      }
+      case "charge.refunded": {
+        // Keep the purchase row honest for Visa OI / MC Clarity lookups: a
+        // response that still advertises the order as refundable after we
+        // already refunded it reads as a merchant contradicting itself, which
+        // is exactly what makes an issuer distrust the rest of the payload.
+        const charge = event.data.object as Stripe.Charge;
+        const piRef = charge.payment_intent;
+        const piId = typeof piRef === "string" ? piRef : piRef?.id;
+        if (piId) {
+          await captureRefund({
+            db,
+            paymentIntentId: piId,
+            amountRefundedCents: charge.amount_refunded ?? 0,
+          });
+        }
         break;
       }
       case "invoice.payment_failed": {
@@ -309,6 +329,17 @@ async function handleUpsellPaid(
     return;
   }
 
+  // Card-network identifiers + Compelling Evidence data for Visa OI / MC
+  // Clarity lookups. The browser context was stashed on the PI's metadata at
+  // /api/upsell-charge time; the email comes off the Stripe customer, since
+  // an upsell has no analysis email of its own to prefer.
+  await capturePaymentEvidence({
+    db,
+    pi,
+    email: await customerEmailFor(pi),
+    metadata: md,
+  });
+
   // Upsells are intentionally NOT sent to Meta as Purchase events. Only the
   // intro subscription charge counts as a website Purchase — counting upsells
   // double-fires Purchase for an already-acquired customer and muddies the
@@ -323,6 +354,25 @@ async function handleUpsellPaid(
       console.error(`[after] Upsell pipeline failed for ${sku} on analysis ${analysisId}:`, err);
     }
   });
+}
+
+/**
+ * Best-effort email for a standalone (upsell) PaymentIntent. Used as the
+ * Compelling Evidence `accountId` — the cardholder has to recognize it, so
+ * the account email is the right value, not an internal user id.
+ */
+async function customerEmailFor(pi: Stripe.PaymentIntent): Promise<string | undefined> {
+  if (pi.receipt_email) return pi.receipt_email;
+  const customerRef = pi.customer;
+  const customerId = typeof customerRef === "string" ? customerRef : customerRef?.id;
+  if (!customerId) return undefined;
+  try {
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer.deleted) return undefined;
+    return customer.email ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function customerIdFromSubscription(sub: Stripe.Subscription): string {
