@@ -51,7 +51,19 @@ export async function capturePaymentEvidence(opts: {
     }
 
     if (charge) {
+      // Which rail this settled on decides whether missing card identifiers
+      // matter: a PayPal charge never receives a scheme lookup, whereas a
+      // Link charge is card-funded and can.
+      const pmType = charge.payment_method_details?.type;
+      if (pmType) update.payment_method_type = pmType;
+
       const card = charge.payment_method_details?.card;
+      if (!card) {
+        console.warn(
+          `[prevent] charge ${charge.id} has no card details (payment_method_type=${pmType ?? "unknown"}) — ` +
+            `this purchase cannot be matched by network transaction id or auth code`,
+        );
+      }
       if (card) {
         update.card_brand = card.brand ?? null;
         update.card_last4 = card.last4 ?? null;
