@@ -96,11 +96,31 @@ first, and stops at the first step that resolves to exactly **one** row:
 1. `network_transaction_id` — Visa's Transaction ID / Mastercard's Trace ID
 2. `acquirer_reference_number` (ARN)
 3. merchant order reference (our purchase id, or the Stripe PaymentIntent id)
-4. auth code + last4 + amount + date
-5. auth code + amount + date
-6. auth code + date
-7. last4 + amount + date
-8. amount + currency + date
+4. card BIN + last4 + amount + date
+5. auth code + last4 + amount + date
+6. auth code + amount + date
+7. auth code + date
+8. last4 + amount + date
+9. amount + currency + date
+
+That covers every field listed under §4.1 Matching Fields in the guide. Two of
+them — card BIN and the payment descriptor (Clarity: `cardAcceptorName`) —
+cannot identify a transaction on their own, so they are also applied as a
+**disambiguation pass**: when a step returns several candidates, they are used
+to try to narrow it to one before the step is written off, which is what the
+guide means by continuing to a more specific condition.
+
+A disambiguating filter is applied only when it leaves at least one row
+standing. Our `card_bin` is usually null (Stripe exposes `iin` only on enabled
+accounts) and descriptors are formatted differently by acquirer and network, so
+a filter matching nothing means *our* data is missing, not that the candidates
+are wrong — dropping every row there would turn a recoverable tie into a lost
+case.
+
+In practice the descriptor rarely breaks a tie, because every transaction we
+take carries the same descriptor. It is there for correctness against the spec
+and as a sanity check; the BIN is the one with real discriminating power, once
+Stripe supplies it.
 
 Every step carries a ±3 day tolerance on `authorized_at` to absorb timezone and
 settlement drift. Amount comparisons only run when the issuer's currency

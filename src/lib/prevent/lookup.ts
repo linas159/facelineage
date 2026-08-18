@@ -58,6 +58,13 @@ export interface MatchInput {
   transactionDate?: Date;
   /** Merchant-defined order reference, when the acquirer forwarded one. */
   purchaseIdentifier?: string;
+  /**
+   * Visa `paymentDescriptor` / Mastercard `cardAcceptorName` — the merchant
+   * name the cardholder sees on their statement. Never a primary key (every
+   * one of our transactions carries the same descriptor), but a useful
+   * tie-breaker when a weaker step returns several candidates.
+   */
+  paymentDescriptor?: string;
 }
 
 export type MatchOutcome =
@@ -168,7 +175,24 @@ function buildCascade(input: MatchInput): Step[] {
     });
   }
 
-  // 4. Auth code + last4 + amount + date — the strongest combination available
+  // 4. Card BIN + last4 + amount + date. Together the BIN and last4 pin down
+  //    the card far more tightly than last4 alone. Stripe only exposes the BIN
+  //    (`iin`) on accounts it has been enabled for, so on our data this step
+  //    usually finds nothing and falls through at no cost — it is here so the
+  //    field is genuinely searched on when it is available.
+  if (input.cardBin && input.cardLast4 && amount.length) {
+    steps.push({
+      strategy: "bin+last4+amount",
+      filters: [
+        { op: "eq", col: "card_bin", val: input.cardBin },
+        { op: "eq", col: "card_last4", val: input.cardLast4 },
+        ...amount,
+        ...window,
+      ],
+    });
+  }
+
+  // 5. Auth code + last4 + amount + date — the strongest combination available
   //    for a Stripe-acquired card transaction.
   if (input.authCode && input.cardLast4 && amount.length) {
     steps.push({
@@ -182,7 +206,7 @@ function buildCascade(input: MatchInput): Step[] {
     });
   }
 
-  // 5. Auth code + amount + date. Auth codes are six digits and are reused
+  // 6. Auth code + amount + date. Auth codes are six digits and are reused
   //    across merchants and time, so they always carry a date window.
   if (input.authCode && amount.length) {
     steps.push({
@@ -191,7 +215,7 @@ function buildCascade(input: MatchInput): Step[] {
     });
   }
 
-  // 6. Auth code + date.
+  // 7. Auth code + date.
   if (input.authCode && window.length) {
     steps.push({
       strategy: "auth_code+date",
@@ -199,7 +223,7 @@ function buildCascade(input: MatchInput): Step[] {
     });
   }
 
-  // 7. Card last4 + amount + date, for lookups that carry no auth code.
+  // 8. Card last4 + amount + date, for lookups that carry no auth code.
   if (input.cardLast4 && amount.length) {
     steps.push({
       strategy: "last4+amount",
@@ -207,7 +231,7 @@ function buildCascade(input: MatchInput): Step[] {
     });
   }
 
-  // 8. Amount + currency + date — the documented last resort. Safe only
+  // 9. Amount + currency + date — the documented last resort. Safe only
   //    because it still has to resolve to exactly one row: our price points
   //    are fixed, so a busy day legitimately yields several candidates and we
   //    correctly decline instead of guessing.
@@ -218,6 +242,13 @@ function buildCascade(input: MatchInput): Step[] {
   return steps;
 }
 
+/**
+ * Fetch up to a handful of candidates for one cascade step.
+ *
+ * The limit is small but greater than two: one row is a match and two is
+ * ambiguous, but a few extra let `disambiguate()` try to break the tie before
+ * we give up on the step.
+ */
 async function runStep(db: DB, filters: Filter[]): Promise<PurchaseRecord[]> {
   let query = db.from("purchases").select(PURCHASE_COLUMNS);
   for (const f of filters) {
@@ -225,13 +256,58 @@ async function runStep(db: DB, filters: Filter[]): Promise<PurchaseRecord[]> {
     else if (f.op === "gte") query = query.gte(f.col, f.val);
     else query = query.lte(f.col, f.val);
   }
-  // Two rows is all we need: one means a match, more than one means ambiguous.
-  const { data, error } = await query.limit(2);
+  const { data, error } = await query.limit(10);
   if (error) {
     console.error("[prevent] lookup step failed:", error);
     return [];
   }
   return (data ?? []) as unknown as PurchaseRecord[];
+}
+
+/** Uppercase alphanumerics only — "FACELINEAGE.COM" and "FACELINEAGE COM" agree. */
+function normalizeDescriptor(value: string | null | undefined): string {
+  return (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * Narrow several candidates using the weaker matching fields.
+ *
+ * The guide's cascade says that when a step returns multiple candidates you
+ * continue to a more specific condition rather than give up. Card BIN and the
+ * payment descriptor are exactly that kind of condition: neither can identify
+ * a transaction alone — every transaction we take carries the same descriptor
+ * — but either can separate two otherwise identical candidates.
+ *
+ * A filter is applied only when it leaves at least one row standing. Our
+ * `card_bin` is usually null and descriptors vary in formatting between the
+ * acquirer and the network, so a filter that matches nothing means our data is
+ * missing, not that the candidates are wrong; dropping every row there would
+ * turn a recoverable tie into a lost case.
+ */
+function disambiguate(rows: PurchaseRecord[], input: MatchInput): PurchaseRecord[] {
+  let candidates = rows;
+
+  if (input.cardBin) {
+    const byBin = candidates.filter((r) => r.card_bin === input.cardBin);
+    if (byBin.length > 0) candidates = byBin;
+  }
+
+  if (input.paymentDescriptor) {
+    const wanted = normalizeDescriptor(input.paymentDescriptor);
+    if (wanted) {
+      const byDescriptor = candidates.filter((r) => {
+        const stored = normalizeDescriptor(r.statement_descriptor);
+        if (!stored) return false;
+        // Visa truncates the descriptor to 25 characters and acquirers append
+        // or trim suffixes, so neither side is reliably a full copy of the
+        // other — containment either way is the honest comparison.
+        return stored.startsWith(wanted) || wanted.startsWith(stored);
+      });
+      if (byDescriptor.length > 0) candidates = byDescriptor;
+    }
+  }
+
+  return candidates;
 }
 
 /**
@@ -256,7 +332,14 @@ export async function findPurchase(db: DB, input: MatchInput): Promise<MatchOutc
     if (rows.length === 1) {
       return { outcome: "found", purchase: rows[0], strategy };
     }
-    if (rows.length > 1) sawMultiple = strategy;
+    if (rows.length > 1) {
+      // Try the weaker fields as a tie-breaker before writing the step off.
+      const narrowed = disambiguate(rows, input);
+      if (narrowed.length === 1) {
+        return { outcome: "found", purchase: narrowed[0], strategy: `${strategy}+disambiguated` };
+      }
+      sawMultiple = strategy;
+    }
   }
 
   if (sawMultiple) return { outcome: "multiple", strategy: sawMultiple };

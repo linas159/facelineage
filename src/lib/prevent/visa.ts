@@ -42,6 +42,9 @@ export interface VisaLookupRequest {
   cardLast4?: string;
   paymentType?: string;
   token?: string;
+  /** Merchant-name component of the billing descriptor, as the cardholder sees it. */
+  paymentDescriptor?: string;
+  paymentDescriptorContact?: string;
   transactionDate?: string;
   transactionAmount?: VisaAmount;
   destinationAmount?: VisaAmount;
@@ -92,6 +95,7 @@ export function visaMatchInput(body: VisaLookupRequest): MatchInput {
     currency: body.transactionAmount?.currency ?? undefined,
     transactionDate: parseDate(body.transactionDate),
     purchaseIdentifier: body.purchaseIdentifier?.trim() || undefined,
+    paymentDescriptor: body.paymentDescriptor?.trim() || undefined,
   };
 }
 

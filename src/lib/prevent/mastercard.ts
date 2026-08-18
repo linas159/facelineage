@@ -95,6 +95,9 @@ export function clarityMatchInput(body: ClarityLookupRequest): MatchInput {
     amountCents: parseAmountToCents(sc.transactionAmount),
     currency: sc.transactionCurrencyCode ?? undefined,
     transactionDate: parseDate(sc.transactionDateTime),
+    // Clarity's equivalent of Visa's paymentDescriptor: the trading name shown
+    // at the point of sale. Same role in matching — a tie-breaker, not a key.
+    paymentDescriptor: sc.cardAcceptorName?.trim() || undefined,
   };
 }
 
