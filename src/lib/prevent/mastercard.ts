@@ -387,6 +387,7 @@ export function buildClarityResponse(
         customerServiceInstructions: fit(POLICY.customerServiceInstructions, 250),
         address: {
           line1: fit(MERCHANT.address.line1, 100),
+          line2: fit(MERCHANT.address.line2, 100),
           city: fit(MERCHANT.address.city, 100),
           postalCode: fit(MERCHANT.address.postalCode, 10),
           country: fit(MERCHANT.address.countryName, 80),

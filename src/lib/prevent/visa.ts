@@ -214,6 +214,7 @@ export function buildVisaResponse(
       merchantContactPhone: fit(MERCHANT.contactPhone, 20),
       merchantAddress: {
         address1: fit(MERCHANT.address.line1, 50),
+        address2: fit(MERCHANT.address.line2, 50),
         city: fit(MERCHANT.address.city, 50),
         postalCode: fit(MERCHANT.address.postalCode, 9),
         country: MERCHANT.address.countryAlpha3,

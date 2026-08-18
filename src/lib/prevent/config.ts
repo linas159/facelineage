@@ -35,9 +35,13 @@ export const MERCHANT = {
   /** ISO 18245 category assigned by the acquirer. Omitted when unset. */
   mcc: process.env.PREVENT_MERCHANT_MCC ?? "",
   address: {
+    // Must match the address registered with the acquirer exactly — Mastercard
+    // compares what we declare against what Stripe holds, and Visa shows it to
+    // the cardholder.
     line1: "Žygio g. 5",
+    line2: "116",
     city: "Vilnius",
-    postalCode: "08234",
+    postalCode: "08230",
     /** ISO 3166-1 alpha-3 — Visa's Address object wants three letters. */
     countryAlpha3: "LTU",
     countryName: "Lithuania",
