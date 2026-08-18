@@ -11,7 +11,8 @@ Spec: <https://admin.merchanto.org/docs/prevent/overview>
 ## Endpoints
 
 All four take `POST`, require HTTPS, take no query parameters, and are guarded
-by HTTP Basic Auth using `PREVENT_API_USERNAME` / `PREVENT_API_PASSWORD`.
+by HTTP Basic Auth, using the credential pair belonging to that scheme (see
+Environment below).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -34,12 +35,24 @@ our own failure, and Merchanto scores all of those as *Failed*.
 ## Environment
 
 ```
-PREVENT_API_USERNAME          # issued by Merchanto
-PREVENT_API_PASSWORD          # issued by Merchanto
+PREVENT_VISA_API_USERNAME     # issued by Merchanto — Visa pair
+PREVENT_VISA_API_PASSWORD
+PREVENT_MC_API_USERNAME       # issued by Merchanto — Mastercard pair
+PREVENT_MC_API_PASSWORD
+PREVENT_API_USERNAME          # optional shared fallback, local testing only
+PREVENT_API_PASSWORD
 PREVENT_MERCHANT_PHONE        # E.164, e.g. +37052112233 — REQUIRED by Visa
 PREVENT_STATEMENT_DESCRIPTOR  # exactly as it appears on the statement
 PREVENT_MERCHANT_MCC          # ISO 18245 code from the acquirer; omitted if blank
 ```
+
+**Credentials are per scheme, not per merchant.** Merchanto issues one pair for
+Visa and another for Mastercard, and signs each inbound call with the pair
+belonging to that scheme. A single shared pair therefore authenticates one
+integration and 401s the other. Each route passes its own scheme to
+`isAuthorized()`, so Visa credentials are rejected by the Mastercard endpoint
+and vice versa; `npm run prevent:test` asserts that isolation explicitly,
+because a regression here fails silently on exactly one scheme.
 
 `PREVENT_MERCHANT_PHONE` is not optional. Visa marks any Order Insight response
 without `merchantInformation.merchantContactPhone` as *Invalid*, and an Invalid

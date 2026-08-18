@@ -44,7 +44,7 @@ export async function handlePreventNotification(
   req: NextRequest,
   scheme: "visa" | "mastercard",
 ): Promise<NextResponse> {
-  if (!isAuthorized(req.headers)) {
+  if (!isAuthorized(req.headers, scheme)) {
     return NextResponse.json(UNAUTHORIZED_BODY, { status: 401 });
   }
 

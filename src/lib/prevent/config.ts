@@ -173,9 +173,21 @@ export function productInfo(sku: string | null | undefined): ProductInfo {
  */
 export function preventConfigIssues(): string[] {
   const issues: string[] = [];
-  if (!process.env.PREVENT_API_USERNAME || !process.env.PREVENT_API_PASSWORD) {
+  // Merchanto issues one credential pair per scheme and signs each call with
+  // the matching one, so a missing pair silently disables that whole scheme
+  // while the other keeps working — a failure mode that is easy to miss.
+  const hasVisa =
+    !!process.env.PREVENT_VISA_API_USERNAME && !!process.env.PREVENT_VISA_API_PASSWORD;
+  const hasMc = !!process.env.PREVENT_MC_API_USERNAME && !!process.env.PREVENT_MC_API_PASSWORD;
+  const hasShared = !!process.env.PREVENT_API_USERNAME && !!process.env.PREVENT_API_PASSWORD;
+  if (!hasVisa && !hasShared) {
     issues.push(
-      "PREVENT_API_USERNAME / PREVENT_API_PASSWORD are unset — every lookup will be rejected with 401.",
+      "PREVENT_VISA_API_USERNAME / PREVENT_VISA_API_PASSWORD are unset — every Visa lookup will be rejected with 401.",
+    );
+  }
+  if (!hasMc && !hasShared) {
+    issues.push(
+      "PREVENT_MC_API_USERNAME / PREVENT_MC_API_PASSWORD are unset — every Mastercard lookup will be rejected with 401.",
     );
   }
   if (!MERCHANT.contactPhone) {

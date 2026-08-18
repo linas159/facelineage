@@ -33,15 +33,25 @@ const BASE = flag("base", process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3
   /\/$/,
   "",
 );
-const USER = process.env.PREVENT_API_USERNAME;
-const PASS = process.env.PREVENT_API_PASSWORD;
-
-if (!USER || !PASS) {
-  console.error("✗ Missing PREVENT_API_USERNAME / PREVENT_API_PASSWORD");
-  process.exit(1);
+// Merchanto issues one credential pair per scheme, so each endpoint must be
+// signed with its own. Falls back to the shared pair when set.
+function creds(scheme) {
+  const prefix = scheme === "visa" ? "PREVENT_VISA" : "PREVENT_MC";
+  const user = process.env[`${prefix}_API_USERNAME`] ?? process.env.PREVENT_API_USERNAME;
+  const pass = process.env[`${prefix}_API_PASSWORD`] ?? process.env.PREVENT_API_PASSWORD;
+  return user && pass ? `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}` : null;
 }
 
-const authHeader = `Basic ${Buffer.from(`${USER}:${PASS}`).toString("base64")}`;
+const AUTH = { visa: creds("visa"), mastercard: creds("mastercard") };
+
+for (const [scheme, header] of Object.entries(AUTH)) {
+  if (!header) {
+    console.error(
+      `✗ Missing credentials for ${scheme} — set PREVENT_${scheme === "visa" ? "VISA" : "MC"}_API_USERNAME / _PASSWORD`,
+    );
+    process.exit(1);
+  }
+}
 
 // ── Pick a transaction to look up ───────────────────────────────────────────
 
@@ -133,13 +143,13 @@ function clarityPayload(p, { miss }) {
 
 let failures = 0;
 
-async function post(path, body, { auth = true } = {}) {
+async function post(path, body, { auth = true, scheme = "visa" } = {}) {
   const startedAt = Date.now();
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      ...(auth ? { authorization: authHeader } : {}),
+      ...(auth ? { authorization: AUTH[scheme] } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -189,7 +199,9 @@ console.log("Visa Order Insight  POST /api/prevent/visa/orders");
   });
   check("rejects a request with no credentials (401)", noAuth.status === 401, `got ${noAuth.status}`);
 
-  const res = await post("/api/prevent/visa/orders", visaPayload(purchase, { miss }));
+  const res = await post("/api/prevent/visa/orders", visaPayload(purchase, { miss }), {
+    scheme: "visa",
+  });
   reportLatency(res.ms);
   if (miss) {
     check("unmatchable lookup returns 404", res.status === 404, `got ${res.status}`);
@@ -231,11 +243,13 @@ console.log("\nMastercard Clarity  POST /api/prevent/mastercard/orders");
   const noAuth = await post(
     "/api/prevent/mastercard/orders",
     clarityPayload(purchase, { miss: false }),
-    { auth: false },
+    { auth: false, scheme: "mastercard" },
   );
   check("rejects a request with no credentials (401)", noAuth.status === 401, `got ${noAuth.status}`);
 
-  const res = await post("/api/prevent/mastercard/orders", clarityPayload(purchase, { miss }));
+  const res = await post("/api/prevent/mastercard/orders", clarityPayload(purchase, { miss }), {
+    scheme: "mastercard",
+  });
   reportLatency(res.ms);
   // Clarity has no 404 — every outcome is a 200 carrying a responseStatus code.
   check("returns HTTP 200", res.status === 200, `got ${res.status}`);
@@ -270,11 +284,31 @@ console.log("\nMastercard Clarity  POST /api/prevent/mastercard/orders");
   }
 }
 
+// ── Credential isolation ────────────────────────────────────────────────────
+// Merchanto issues a separate pair per scheme. Presenting one scheme's
+// credentials to the other scheme's endpoint must fail: if it succeeds, the
+// endpoints are sharing a single pair and one of the two integrations will
+// break the moment Merchanto rotates either one independently.
+console.log("\nCredential isolation");
+{
+  const v = await post("/api/prevent/visa/orders", visaPayload(purchase, { miss: false }), {
+    scheme: "mastercard",
+  });
+  check("visa/orders rejects Mastercard credentials", v.status === 401, `got ${v.status}`);
+
+  const m = await post(
+    "/api/prevent/mastercard/orders",
+    clarityPayload(purchase, { miss: false }),
+    { scheme: "visa" },
+  );
+  check("mastercard/orders rejects Visa credentials", m.status === 401, `got ${m.status}`);
+}
+
 // ── Notifications ───────────────────────────────────────────────────────────
 console.log("\nNotifications");
 for (const scheme of ["visa", "mastercard"]) {
   const path = `/api/prevent/${scheme}/notifications`;
-  const noAuth = await post(path, { caseId: uuid(), caseStatus: "new" }, { auth: false });
+  const noAuth = await post(path, { caseId: uuid(), caseStatus: "new" }, { auth: false, scheme });
   check(`${scheme}: rejects a request with no credentials (401)`, noAuth.status === 401, `got ${noAuth.status}`);
 
   const res = await post(path, {

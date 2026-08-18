@@ -40,7 +40,7 @@ export const maxDuration = 15;
 export async function POST(req: NextRequest) {
   const startedAt = Date.now();
 
-  if (!isAuthorized(req.headers)) {
+  if (!isAuthorized(req.headers, "visa")) {
     return NextResponse.json(UNAUTHORIZED_BODY, { status: 401 });
   }
 
