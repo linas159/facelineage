@@ -13,6 +13,7 @@ import { runMainPipeline } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
 import { capturePaymentEvidence } from "@/lib/prevent/evidence";
 import { sendReportReadyEmail } from "@/lib/email/send";
+import { formatChargeMoment } from "@/lib/email/templates";
 import { metaEventId, sendMetaEvent } from "@/lib/meta/capi";
 
 type DB = ReturnType<typeof createServiceClient>;
@@ -262,12 +263,12 @@ export async function provisionIntroPayment(opts: {
           day: "numeric",
         }),
         cardLast4,
+        // The instant, not just the day. This receipt is the customer's first
+        // and most-kept record of when the trial converts, so it has to name
+        // the exact moment their cancellation window closes — a bare date
+        // reads as "any time on the 18th" and invites a disputed charge.
         trialEnds: trialEndsEpoch
-          ? new Date(trialEndsEpoch * 1000).toLocaleDateString("en-US", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })
+          ? formatChargeMoment(trialEndsEpoch)
           : "the end of your trial",
         recurringAmount: `${formatPrice(recurringAmountCents, currency, "en")}/${planMeta.recurringPeriod}`,
       });

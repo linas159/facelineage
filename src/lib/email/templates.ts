@@ -23,7 +23,7 @@ export interface ReportReadyEmailVars {
   amountPaid: string;     // "$1.95"
   paymentDate: string;    // "May 14, 2026"
   cardLast4?: string;     // "4242"
-  trialEnds: string;      // "May 17, 2026"
+  trialEnds: string;      // "May 17, 2026 at 6:07 PM UTC"
   recurringAmount: string; // "$24.99/week"
 }
 
@@ -172,9 +172,17 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Upcoming-charge reminder — sent ~1 day before any subscription charge.
-// Covers both the first charge after the free trial AND every recurring
-// renewal afterwards. Same template, copy adapts via `isFirstCharge`.
+// Upcoming-charge reminder — sent a full day or more before any subscription
+// charge. Covers both the first charge after the free trial AND every
+// recurring renewal afterwards. Same template, copy adapts via
+// `isFirstCharge`.
+//
+// Every "when" below is DERIVED from `daysUntilCharge` / `chargeMoment` and
+// never hardcoded. A reminder that promises "tomorrow" while the card is
+// charged the same afternoon is the most disputable thing we can put in a
+// customer's inbox: it reads as a bait-and-switch to them, to their bank, and
+// to a scheme reviewing the chargeback. The copy is only ever as confident as
+// the timestamps allow.
 // ────────────────────────────────────────────────────────────────────────────
 
 export interface UpcomingChargeEmailVars {
@@ -184,6 +192,10 @@ export interface UpcomingChargeEmailVars {
   chargeAmount: string;   // "$24.99"
   interval?: string;      // "week" | "month"
   chargeDate: string;     // "June 15, 2026"
+  /** The charge instant incl. time + zone: "June 15, 2026 at 6:07 PM UTC". */
+  chargeMoment: string;
+  /** Whole calendar days (UTC) from send to charge. 1 = tomorrow, 0 = today. */
+  daysUntilCharge: number;
   cardLast4?: string;     // "4242"
   manageUrl: string;      // https://facelineage.com/account
 }
@@ -196,15 +208,27 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
   const hello = v.firstName ? `Hi ${escape(v.firstName)},` : "Hello,";
   const everyInterval = v.interval ? `every ${escape(v.interval)}` : "on a recurring basis";
 
-  const subject = v.isFirstCharge
-    ? `Your Facelineage trial ends tomorrow — ${v.chargeAmount} on ${v.chargeDate}`
-    : `Reminder: your Facelineage subscription renews tomorrow — ${v.chargeAmount}`;
+  // "in 3 days" / "tomorrow" / "later today" — read off the clock, not
+  // assumed. The last branch should only ever fire as a catch-up after a
+  // missed cron run, but if it does the customer gets the truth.
+  const when =
+    v.daysUntilCharge >= 2
+      ? `in ${v.daysUntilCharge} days`
+      : v.daysUntilCharge === 1
+        ? "tomorrow"
+        : "later today";
+  const When = when.charAt(0).toUpperCase() + when.slice(1);
+  const moment = escape(v.chargeMoment);
 
-  const headline = v.isFirstCharge ? "Your trial ends tomorrow" : "Your subscription renews tomorrow";
+  const subject = v.isFirstCharge
+    ? `Your Facelineage trial ends ${when} — ${v.chargeAmount} on ${v.chargeDate}`
+    : `Reminder: your Facelineage subscription renews ${when} — ${v.chargeAmount}`;
+
+  const headline = v.isFirstCharge ? `Your trial ends ${when}` : `Your subscription renews ${when}`;
 
   const lead = v.isFirstCharge
-    ? `Your free trial of Facelineage ends on <strong style="color:${BRAND.ink};">${escape(v.chargeDate)}</strong>. Tomorrow we&rsquo;ll start your subscription and charge the payment method on file. After that you&rsquo;ll be billed ${everyInterval} until you cancel.`
-    : `This is a friendly reminder that your Facelineage subscription renews on <strong style="color:${BRAND.ink};">${escape(v.chargeDate)}</strong>. Tomorrow we&rsquo;ll charge the payment method on file for another ${v.interval ? escape(v.interval) : "period"}.`;
+    ? `Your free trial of Facelineage ends on <strong style="color:${BRAND.ink};">${moment}</strong>. ${When} we&rsquo;ll start your subscription and charge the payment method on file. After that you&rsquo;ll be billed ${everyInterval} until you cancel.`
+    : `This is a friendly reminder that your Facelineage subscription renews on <strong style="color:${BRAND.ink};">${moment}</strong>. ${When} we&rsquo;ll charge the payment method on file for another ${v.interval ? escape(v.interval) : "period"}.`;
 
   const cardLine = v.cardLast4
     ? `<tr><td style="padding:4px 0;">Payment method</td><td align="right" style="padding:4px 0;color:${BRAND.ink};">Card ending ●●●● ${escape(v.cardLast4)}</td></tr>`
@@ -219,7 +243,7 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
 </head>
 <body style="margin:0;padding:0;background:${BRAND.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.ink};">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-    You&rsquo;ll be charged ${escape(v.chargeAmount)} tomorrow. Cancel or request a refund anytime from your dashboard.
+    You&rsquo;ll be charged ${escape(v.chargeAmount)} ${when}, on ${moment}. Cancel or request a refund anytime from your dashboard.
   </div>
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.bg};padding:32px 16px;">
@@ -238,7 +262,7 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
                       ${headline}
                     </div>
                     <div style="margin-top:12px;font-size:15px;line-height:1.45;color:rgba(255,255,255,0.92);">
-                      You&rsquo;ll be charged <strong style="color:#ffffff;">${escape(v.chargeAmount)}</strong> tomorrow.
+                      You&rsquo;ll be charged <strong style="color:#ffffff;">${escape(v.chargeAmount)}</strong> ${when}, on ${moment}.
                     </div>
                   </td>
                 </tr>
@@ -265,7 +289,7 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
                   </tr>
                   <tr>
                     <td style="padding:4px 0;">Charge date</td>
-                    <td align="right" style="padding:4px 0;color:${BRAND.ink};">${escape(v.chargeDate)} (tomorrow)</td>
+                    <td align="right" style="padding:4px 0;color:${BRAND.ink};">${moment} (${when})</td>
                   </tr>
                   ${cardLine}
                 </table>
@@ -275,7 +299,7 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
               <div style="margin:0 0 24px 0;padding:22px 22px 8px 22px;border:2px solid ${BRAND.violet};border-radius:16px;background:#ffffff;">
                 <div style="font-size:16px;font-weight:800;color:${BRAND.ink};margin-bottom:6px;">You&rsquo;re in control</div>
                 <p style="margin:0 0 16px 0;font-size:14px;line-height:1.6;color:${BRAND.inkSoft};">
-                  Don&rsquo;t want to be charged? You can <strong style="color:${BRAND.ink};">cancel</strong> or <strong style="color:${BRAND.ink};">request a refund</strong> yourself, right now, from your Facelineage dashboard — no need to wait and no questions asked. Cancel before ${escape(v.chargeDate)} and you won&rsquo;t be charged.
+                  Don&rsquo;t want to be charged? You can <strong style="color:${BRAND.ink};">cancel</strong> or <strong style="color:${BRAND.ink};">request a refund</strong> yourself, right now, from your Facelineage dashboard — no need to wait and no questions asked. Cancel any time before <strong style="color:${BRAND.ink};">${moment}</strong> and you won&rsquo;t be charged.
                 </p>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
@@ -322,14 +346,14 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
     hello.replace(",", ""),
     "",
     v.isFirstCharge
-      ? `Your free Facelineage trial ends on ${v.chargeDate}.`
-      : `Your Facelineage subscription renews on ${v.chargeDate}.`,
-    `Tomorrow you'll be charged ${v.chargeAmount}${v.interval ? `/${v.interval}` : ""}` +
+      ? `Your free Facelineage trial ends on ${v.chargeMoment}.`
+      : `Your Facelineage subscription renews on ${v.chargeMoment}.`,
+    `${When} you'll be charged ${v.chargeAmount}${v.interval ? `/${v.interval}` : ""}` +
       (v.cardLast4 ? ` to your card ending ${v.cardLast4}.` : "."),
     "",
     "YOU'RE IN CONTROL",
     `You can cancel or request a refund yourself, anytime, from your Facelineage dashboard: ${v.manageUrl}`,
-    `Cancel before ${v.chargeDate} and you won't be charged.`,
+    `Cancel any time before ${v.chargeMoment} and you won't be charged.`,
     "Prefer help? Email support@facelineage.com and we'll sort it out.",
     "",
     "Happy to continue? No action needed — your subscription renews automatically.",
@@ -338,6 +362,30 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
   ].join("\n");
 
   return { subject, html, text };
+}
+
+/**
+ * The exact instant money moves, in UTC — "August 18, 2026 at 6:07 PM UTC".
+ *
+ * Billing copy must name the moment, not the day. A bare date leaves the
+ * customer guessing which hour their cancellation window closes, and leaves us
+ * with nothing precise to point at when the charge is disputed.
+ */
+export function formatChargeMoment(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleString("en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+}
+
+/** Whole calendar days (UTC) between two unix timestamps. 1 = tomorrow. */
+export function calendarDaysUntil(toUnix: number, fromUnix: number): number {
+  return Math.floor(toUnix / 86_400) - Math.floor(fromUnix / 86_400);
 }
 
 function row(icon: string, title: string, desc: string): string {

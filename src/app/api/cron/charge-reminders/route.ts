@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { stripe, priceAmountFor, isCurrency, formatPrice, type Currency } from "@/lib/stripe";
-import { renderUpcomingChargeEmail } from "@/lib/email/templates";
+import {
+  renderUpcomingChargeEmail,
+  formatChargeMoment,
+  calendarDaysUntil,
+} from "@/lib/email/templates";
 import { createServiceClient } from "@/lib/supabase/server";
 import { Resend } from "resend";
 
@@ -12,8 +16,8 @@ export const maxDuration = 60;
 /**
  * GET /api/cron/charge-reminders
  *
- * Vercel Cron hits this once a day. We email every subscriber ~1 day before
- * money leaves their account — for BOTH:
+ * Vercel Cron hits this once a day. We email every subscriber a full day or
+ * more before money leaves their account — for BOTH:
  *   • the first charge as a free trial ends (status `trialing`, charge at
  *     `trial_end`), and
  *   • every recurring renewal afterwards (status `active`, charge at
@@ -32,10 +36,24 @@ export const maxDuration = 60;
  * matching env, we 401 to keep the endpoint private.
  */
 
-// Daily cron, so the look-ahead window must exceed the 24h cadence or a
-// charge could slip between runs. 28h gives a small safety margin while
-// keeping the reminder close to "one day before".
-const WINDOW_HOURS = 28;
+// The reminder has to land a FULL day before the money moves, and the size of
+// this window is the only thing that decides that.
+//
+// It used to be 28h, which quietly turned the "day before" reminder into a
+// same-day one for a large slice of subscribers. The cron fires at 10:00 UTC,
+// so a charge at 18:07 is 32h out at yesterday's run (28h window → skipped)
+// and 8h out at today's (→ sent). Every customer whose charge time-of-day
+// lands after ~14:00 UTC — around 42% of them — got eight hours' notice from
+// an email whose copy promised "tomorrow".
+//
+// The fix is a window WIDER than the 24h cron cadence, not narrower: at 52h,
+// the first run that sees a charge is always 28–52h ahead of it, so the
+// reminder is at minimum a clear day early. The later run that also sees the
+// charge is a no-op — the `charge_reminder_sent_for` stamp keeps it to one
+// send — which doubles as cover for a single failed cron run.
+//
+// Lower bound: don't shrink below ~26h or the same-day gap reopens.
+const WINDOW_HOURS = 52;
 
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
@@ -137,7 +155,10 @@ export async function GET(req: Request) {
       // must not abort the whole run and starve everyone else.
       try {
         const chargeAt = status === "trialing" ? sub.trial_end : sub.current_period_end;
-        // Outside the look-ahead window, or no charge coming → skip.
+        // Outside the look-ahead window, or no charge coming → skip. Charges
+        // nearer than ~28h were already reminded on an earlier run; they only
+        // reach the send path below as a catch-up after a missed run, and the
+        // template states the real remaining time when they do.
         if (!chargeAt || chargeAt < now || chargeAt > windowEnd) {
           skipped++;
           continue;
@@ -226,7 +247,10 @@ export async function GET(req: Request) {
           last4Of(customer.invoice_settings?.default_payment_method ?? null);
 
         const firstName = customer.name?.trim().split(/\s+/)[0] || undefined;
+        // Rendered in UTC, like the moment and the day count below it, so the
+        // three can never contradict each other in the same email.
         const chargeDate = new Date(chargeAt * 1000).toLocaleDateString("en-US", {
+          timeZone: "UTC",
           year: "numeric",
           month: "long",
           day: "numeric",
@@ -238,6 +262,8 @@ export async function GET(req: Request) {
           chargeAmount,
           interval,
           chargeDate,
+          chargeMoment: formatChargeMoment(chargeAt),
+          daysUntilCharge: calendarDaysUntil(chargeAt, now),
           cardLast4,
           manageUrl,
         });
