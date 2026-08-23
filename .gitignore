@@ -50,3 +50,6 @@ supabase/.temp
 
 # generated ad creatives
 ad-posts-output/
+
+# Accuracy-eval sample faces — real selfies; never commit biometric data.
+/eval/

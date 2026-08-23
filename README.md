@@ -9,8 +9,8 @@ AI ancestry analysis from a single photo. Mobile-first Next.js 15 + Supabase + S
 - **Fonts:** Outfit (body) + Signika (display) via `next/font/google`
 - **Auth + DB + Storage:** Supabase
 - **Payments:** Stripe (chained intro→recurring via Subscription Schedules)
-- **AI — face attributes:** DeepFace via Replicate + Face++ (M3)
-- **AI — narrative:** Claude Sonnet 4.6 (M3)
+- **AI — face reading + narrative:** Claude Opus 5 (high-resolution vision; adaptive thinking)
+- **AI — portraits:** nano-banana via Replicate / Google AI Studio
 - **Email:** Resend (M3)
 - **Hosting:** Vercel
 
