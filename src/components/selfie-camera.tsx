@@ -45,8 +45,13 @@ export function SelfieCamera({ open, onCapture, onClose }: SelfieCameraProps) {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "user",
-            width: { ideal: 1280 },
-            height: { ideal: 1280 },
+            // The analysis model reads images at up to 2576px on the long
+            // edge, and eye colour / hair depth live in the detail that a
+            // 1280px frame throws away — an iris is only ~50px across at that
+            // size. `ideal` degrades gracefully: a camera that can't manage
+            // 2560 just gives us its best, exactly as before.
+            width: { ideal: 2560 },
+            height: { ideal: 2560 },
           },
           audio: false,
         });
@@ -108,12 +113,17 @@ export function SelfieCamera({ open, onCapture, onClose }: SelfieCameraProps) {
     setFlash(true);
     setTimeout(() => setFlash(false), 160);
 
-    // Center-square crop at the camera's native resolution.
+    // Center-square crop at the camera's native resolution, clamped to what
+    // the analysis model can actually read. A 4K sensor would otherwise hand
+    // us a 3024px crop: bytes we pay to upload and store, and that the model
+    // discards on the way in.
+    const MAX_EDGE = 2560;
     const w = video.videoWidth;
     const h = video.videoHeight;
-    const size = Math.min(w, h);
-    const sx = (w - size) / 2;
-    const sy = (h - size) / 2;
+    const crop = Math.min(w, h);
+    const size = Math.min(crop, MAX_EDGE);
+    const sx = (w - crop) / 2;
+    const sy = (h - crop) / 2;
 
     canvas.width = size;
     canvas.height = size;
@@ -127,7 +137,7 @@ export function SelfieCamera({ open, onCapture, onClose }: SelfieCameraProps) {
     ctx.save();
     ctx.translate(size, 0);
     ctx.scale(-1, 1);
-    ctx.drawImage(video, sx, sy, size, size, 0, 0, size, size);
+    ctx.drawImage(video, sx, sy, crop, crop, 0, 0, size, size);
     ctx.restore();
 
     canvas.toBlob(

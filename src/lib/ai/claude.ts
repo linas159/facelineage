@@ -7,10 +7,42 @@ function client(): Anthropic {
   if (!_client) {
     const key = process.env.ANTHROPIC_API_KEY;
     if (!key) throw new Error("ANTHROPIC_API_KEY missing");
-    _client = new Anthropic({ apiKey: key });
+    // The SDK's own retry sits *inside* our attempt loop: it soaks up the
+    // transient blips (connection resets, the odd 529) without burning one of
+    // our four attempts, which are reserved for failures a fresh generation
+    // can fix. Timeout is generous because every call here streams.
+    _client = new Anthropic({ apiKey: key, maxRetries: 3, timeout: 10 * 60 * 1000 });
   }
   return _client;
 }
+
+/**
+ * Reading eye colour, hair depth and skin undertone off a selfie is a
+ * *resolution* problem before it is a reasoning problem. Opus 5 accepts images
+ * up to 2576px on the long edge and spends up to ~4784 tokens on one image;
+ * Haiku 4.5 (which this used to run on) caps at 1568px and ~1600 tokens, which
+ * compresses an iris down to a handful of tokens. That is why the model used to
+ * guess eye and hair colour instead of reading it.
+ */
+const PRIMARY_MODEL = "claude-opus-5";
+
+/**
+ * Last-resort rescue model. Reached only on the final attempt, after the
+ * primary has already failed repeatedly — a sustained Opus outage or a request
+ * the primary keeps declining. Sonnet 5 has the same high-resolution vision,
+ * so a rescued report is still a good report, not a degraded one.
+ */
+const RESCUE_MODEL = "claude-sonnet-5";
+
+/**
+ * Server-side refusal fallback. Inferring ancestry from a face sits close
+ * enough to a sensitive category that a safety classifier may occasionally
+ * decline — and a decline arrives as HTTP 200 with `stop_reason: "refusal"`,
+ * not as an error. `fallbacks: "default"` re-runs the same request on an
+ * appropriate fallback model *inside the same call*, so the customer never
+ * sees it. A decline before any output is not billed.
+ */
+const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 export type AnalysisResult = {
   conclusion: string;
@@ -238,14 +270,28 @@ export type AnalyzeContext = {
  * `uniqueness_score`) are simply absent, which is what used to surface as
  * "Cannot read properties of undefined (reading 'image_prompt')".
  *
- * Haiku 4.5 allows up to 64k output tokens; 16k keeps us far clear of the
- * ceiling while staying under the SDK's non-streaming HTTP timeout. We only
- * pay for tokens actually generated, so the headroom is free.
+ * Adaptive thinking spends tokens from this same budget before a single field
+ * of the report is written, so the old 16k ceiling is no longer enough headroom
+ * — that is exactly how a report comes back missing its tail fields. 32k keeps
+ * us clear of it. Every call here streams, so a large budget costs us nothing
+ * in timeout risk, and we only pay for tokens actually generated.
  */
-const MAX_OUTPUT_TOKENS = 16000;
+const MAX_OUTPUT_TOKENS = 32000;
 
 /** How many times to re-run a truncated / malformed / transient-failure call. */
 const MAX_ANALYSIS_ATTEMPTS = 4;
+
+/**
+ * Which model a given attempt runs on.
+ *
+ * The final attempt switches models deliberately. By that point the primary has
+ * failed three times, and a fourth identical request is the least likely thing
+ * to behave differently — a different model is. This is the last thing standing
+ * between a paying customer and an empty report.
+ */
+function modelForAttempt(attempt: number): string {
+  return attempt >= MAX_ANALYSIS_ATTEMPTS ? RESCUE_MODEL : PRIMARY_MODEL;
+}
 
 /** Thrown when a response is unusable but a fresh attempt is likely to work. */
 class RetryableAnalysisError extends Error {
@@ -259,6 +305,21 @@ class RetryableAnalysisError extends Error {
     this.name = "RetryableAnalysisError";
     this.problems = opts.problems ?? [];
     this.truncated = opts.truncated ?? false;
+  }
+}
+
+/**
+ * The model (and its whole server-side fallback chain) declined the request.
+ *
+ * Distinct from `RetryableAnalysisError` because the fix is different: re-asking
+ * the same model the same question gets the same answer. The only useful move
+ * is to change model, so the attempt loop treats this as an instant escalation
+ * rather than one more retry.
+ */
+class AnalysisRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AnalysisRefusedError";
   }
 }
 
@@ -303,20 +364,33 @@ export async function analyzeFace(opts: {
 }): Promise<AnalysisResult> {
   let lastError: unknown;
   let lastAnalysisError: RetryableAnalysisError | null = null;
+  let attempt = 1;
 
-  for (let attempt = 1; attempt <= MAX_ANALYSIS_ATTEMPTS; attempt++) {
+  while (attempt <= MAX_ANALYSIS_ATTEMPTS) {
     try {
       return await analyzeFaceOnce(opts, attempt, lastAnalysisError);
     } catch (err) {
       lastError = err;
       lastAnalysisError = err instanceof RetryableAnalysisError ? err : null;
       const message = err instanceof Error ? err.message : String(err);
+
+      // A refusal is not something a retry fixes — only a different model is.
+      // Skip straight to the final attempt, which runs on the rescue model.
+      if (err instanceof AnalysisRefusedError && attempt < MAX_ANALYSIS_ATTEMPTS) {
+        console.warn(
+          `[claude] analyze attempt ${attempt} refused, escalating to ${RESCUE_MODEL}: ${message}`,
+        );
+        attempt = MAX_ANALYSIS_ATTEMPTS;
+        continue;
+      }
+
       if (!isRetryable(err) || attempt === MAX_ANALYSIS_ATTEMPTS) {
         console.error(`[claude] analyze attempt ${attempt} failed (final): ${message}`);
         throw err;
       }
       console.warn(`[claude] analyze attempt ${attempt} failed, retrying: ${message}`);
       await sleep(1000 * attempt);
+      attempt++;
     }
   }
 
@@ -339,9 +413,22 @@ async function analyzeFaceOnce(
   // cached system + tool prefix) so prompt caching is unaffected.
   const nudge = retryNudge(previousFailure);
 
-  const resp = await c.messages.create({
-    model: "claude-haiku-4-5",
+  const model = modelForAttempt(attempt);
+
+  // Streamed rather than awaited whole: with adaptive thinking and a 32k
+  // budget this is a long call, and streaming keeps the connection alive
+  // instead of racing the SDK's HTTP timeout. We don't render tokens as they
+  // arrive, so we just wait for the assembled message.
+  const stream = c.beta.messages.stream({
+    model,
     max_tokens: MAX_OUTPUT_TOKENS,
+    betas: [FALLBACK_BETA],
+    fallbacks: "default",
+    // Reading fine detail off a face is exactly the work adaptive thinking
+    // helps with. `high` is the quality sweet spot that still finishes well
+    // inside the 300s Vercel ceiling the callers run under.
+    thinking: { type: "adaptive" },
+    output_config: { effort: "high" },
     // Cache the static system prompt + tool schema so re-runs are cheap.
     system: [
       {
@@ -355,7 +442,7 @@ async function analyzeFaceOnce(
         ...ANALYSIS_TOOL,
         cache_control: { type: "ephemeral" },
       },
-    ] as never,
+    ],
     tool_choice: { type: "tool", name: "report_analysis" },
     messages: [
       {
@@ -379,8 +466,11 @@ async function analyzeFaceOnce(
     ],
   });
 
+  const resp = await stream.finalMessage();
+
   console.log(
-    `[claude] analyze attempt=${attempt} stop_reason=${resp.stop_reason} output_tokens=${resp.usage.output_tokens}/${MAX_OUTPUT_TOKENS}`,
+    `[claude] analyze attempt=${attempt} model=${model} served_by=${resp.model} ` +
+      `stop_reason=${resp.stop_reason} output_tokens=${resp.usage.output_tokens}/${MAX_OUTPUT_TOKENS}`,
   );
 
   // A truncated response still carries a tool_use block, but its `input` is
@@ -390,6 +480,15 @@ async function analyzeFaceOnce(
     throw new RetryableAnalysisError(
       `Response truncated at max_tokens (${resp.usage.output_tokens} output tokens) — result is incomplete`,
       { truncated: true },
+    );
+  }
+
+  // The whole fallback chain declined. Retrying the identical request on the
+  // identical model would only burn an attempt, so mark it non-retryable and
+  // let the attempt loop jump straight to the rescue model.
+  if (resp.stop_reason === "refusal") {
+    throw new AnalysisRefusedError(
+      `Model declined the request (category=${resp.stop_details?.category ?? "unknown"})`,
     );
   }
 
@@ -549,18 +648,29 @@ export async function compareParents(opts: {
   fatherMediaType: "image/jpeg" | "image/png" | "image/webp";
 }): Promise<ParentsComparison> {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_ANALYSIS_ATTEMPTS; attempt++) {
+  let attempt = 1;
+  while (attempt <= MAX_ANALYSIS_ATTEMPTS) {
     try {
-      return await compareParentsOnce(opts);
+      return await compareParentsOnce(opts, attempt);
     } catch (err) {
       lastError = err;
       const message = err instanceof Error ? err.message : String(err);
+
+      if (err instanceof AnalysisRefusedError && attempt < MAX_ANALYSIS_ATTEMPTS) {
+        console.warn(
+          `[claude] parents attempt ${attempt} refused, escalating to ${RESCUE_MODEL}: ${message}`,
+        );
+        attempt = MAX_ANALYSIS_ATTEMPTS;
+        continue;
+      }
+
       if (!isRetryable(err) || attempt === MAX_ANALYSIS_ATTEMPTS) {
         console.error(`[claude] parents attempt ${attempt} failed (final): ${message}`);
         throw err;
       }
       console.warn(`[claude] parents attempt ${attempt} failed, retrying: ${message}`);
       await sleep(1000 * attempt);
+      attempt++;
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -573,13 +683,20 @@ async function compareParentsOnce(opts: {
   motherMediaType: "image/jpeg" | "image/png" | "image/webp";
   fatherImageBase64: string;
   fatherMediaType: "image/jpeg" | "image/png" | "image/webp";
-}): Promise<ParentsComparison> {
+}, attempt: number): Promise<ParentsComparison> {
   const c = client();
-  const resp = await c.messages.create({
-    model: "claude-haiku-4-5",
-    max_tokens: 4096,
+  const model = modelForAttempt(attempt);
+  const stream = c.beta.messages.stream({
+    model,
+    // Three full-resolution faces in one request, plus thinking. The output
+    // itself is short, but the budget has to cover the reasoning too.
+    max_tokens: 16000,
+    betas: [FALLBACK_BETA],
+    fallbacks: "default",
+    thinking: { type: "adaptive" },
+    output_config: { effort: "high" },
     system: [{ type: "text", text: PARENTS_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    tools: [{ ...PARENTS_TOOL, cache_control: { type: "ephemeral" } }] as never,
+    tools: [{ ...PARENTS_TOOL, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "tool", name: "parents_comparison" },
     messages: [
       {
@@ -596,8 +713,14 @@ async function compareParentsOnce(opts: {
       },
     ],
   });
+  const resp = await stream.finalMessage();
   if (resp.stop_reason === "max_tokens") {
     throw new RetryableAnalysisError("Parents comparison truncated at max_tokens");
+  }
+  if (resp.stop_reason === "refusal") {
+    throw new AnalysisRefusedError(
+      `Model declined the parents comparison (category=${resp.stop_details?.category ?? "unknown"})`,
+    );
   }
   const toolUse = resp.content.find((b) => b.type === "tool_use");
   if (!toolUse || toolUse.type !== "tool_use") {

@@ -160,8 +160,7 @@ export async function runMainPipeline(
 
     // 1. Pull selfie bytes. Only strictly needed when we still have to run
     // Claude; for a portrait-only repair it's a nice-to-have reference image.
-    let selfie: { bytes: Buffer; mediaType: "image/jpeg" | "image/png" | "image/webp" } | null =
-      null;
+    let selfie: { bytes: Buffer; mediaType: SupportedMediaType } | null = null;
     if (row.photo_path) {
       try {
         selfie = await downloadFromStorage(db, PHOTOS_BUCKET, row.photo_path);
@@ -542,18 +541,57 @@ async function runBookScaffold(opts: { analysisId: string; purchaseId: string })
 // Storage helpers
 // ────────────────────────────────────────────────────────────────────────────
 
+export type SupportedMediaType = "image/jpeg" | "image/png" | "image/webp";
+
+/**
+ * Identify an image from its magic bytes.
+ *
+ * The filename is not evidence. `photo.png` holding JPEG bytes, or an iPhone
+ * library pick landing as `.heic`, both used to be declared to the model as
+ * whatever the extension claimed — and a declared/actual mismatch comes back
+ * as HTTP 400, which is *not* retryable. The pipeline would then burn all five
+ * attempts on the same unfixable error and a paying customer would end up with
+ * no report at all. Reading the bytes removes the guess.
+ */
+export function sniffMediaType(bytes: Buffer): SupportedMediaType | { unsupported: string } {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes.subarray(0, 4).toString("latin1") === "RIFF" &&
+    bytes.subarray(8, 12).toString("latin1") === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  // ISO-BMFF container: HEIC/HEIF/AVIF. The model cannot read any of them, so
+  // name the brand rather than passing bytes it will reject.
+  if (bytes.length >= 12 && bytes.subarray(4, 8).toString("latin1") === "ftyp") {
+    return { unsupported: `${bytes.subarray(8, 12).toString("latin1").trim()} (HEIC/HEIF-family)` };
+  }
+  return { unsupported: "unrecognized image format" };
+}
+
 async function downloadFromStorage(
   db: DB,
   bucket: string,
   path: string,
-): Promise<{ bytes: Buffer; mediaType: "image/jpeg" | "image/png" | "image/webp" }> {
+): Promise<{ bytes: Buffer; mediaType: SupportedMediaType }> {
   const { data, error } = await db.storage.from(bucket).download(path);
   if (error || !data) throw new Error(`Storage download failed: ${error?.message}`);
   const bytes = Buffer.from(await data.arrayBuffer());
-  const ext = (path.split(".").pop() ?? "jpg").toLowerCase();
-  const mediaType: "image/jpeg" | "image/png" | "image/webp" =
-    ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
-  return { bytes, mediaType };
+
+  const sniffed = sniffMediaType(bytes);
+  if (typeof sniffed !== "string") {
+    throw new Error(
+      `Photo at ${path} is ${sniffed.unsupported}, which the analysis model cannot read. ` +
+        `It should have been converted to JPEG at upload time.`,
+    );
+  }
+  return { bytes, mediaType: sniffed };
 }
 
 async function uploadGenerated(db: DB, path: string, bytes: Buffer): Promise<string> {

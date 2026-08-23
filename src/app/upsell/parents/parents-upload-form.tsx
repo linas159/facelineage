@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { uploadParentPhotos } from "@/lib/actions/upload-parents";
+import { normalizeToJpeg } from "@/lib/image-normalize";
 
 interface Props {
   analysisId: string;
@@ -85,7 +86,11 @@ function PhotoPicker({
         type="file"
         accept="image/jpeg,image/png,image/webp,image/heic"
         className="hidden"
-        onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+        onChange={async (e) => {
+          const picked = e.target.files?.[0];
+          // iOS hands back HEIC here too, which the model cannot read.
+          onChange(picked ? await normalizeToJpeg(picked) : null);
+        }}
       />
     </label>
   );

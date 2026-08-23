@@ -13,6 +13,7 @@ import {
 } from "@/components/icons";
 import { SelfieCamera, isCameraSupported } from "@/components/selfie-camera";
 import { uploadPhoto } from "@/lib/actions/upload-photo";
+import { normalizeToJpeg } from "@/lib/image-normalize";
 import { useI18n } from "@/lib/i18n/client";
 import { capture } from "@/lib/posthog/client";
 
@@ -27,12 +28,15 @@ export function CaptureView() {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraFallbackRef = useRef<HTMLInputElement>(null);
 
-  function handleFile(f: File | null) {
+  async function handleFile(f: File | null) {
     if (!f) return;
     setError(null);
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
     capture("capture_photo_selected", { source: cameraOpen ? "camera" : "library" });
+    // Library picks and the native camera input both hand back HEIC on iOS,
+    // which the analysis model cannot read. Convert before it reaches storage.
+    const normalized = await normalizeToJpeg(f);
+    setFile(normalized);
+    setPreview(URL.createObjectURL(normalized));
   }
 
   function openCamera() {
