@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
 import { capturePaymentEvidence, captureRefund } from "@/lib/prevent/evidence";
+import { recordDispute } from "@/lib/prevent/disputes";
 import { provisionIntroPayment } from "@/lib/provisioning";
 import { getOrCreateAuthUser } from "@/lib/auth-user";
 
@@ -27,6 +28,8 @@ export const maxDuration = 300;
  *  - invoice.payment_failed → past_due
  *  - charge.refunded → mirror refund onto the purchase (dispute-prevention
  *    lookups read it back; see @/lib/prevent)
+ *  - charge.dispute.* → mirror the dispute into our own ledger, stamped with
+ *    how many Prevent lookups preceded it (see @/lib/prevent/disputes)
  */
 export async function POST(req: NextRequest) {
   if (!stripe) return NextResponse.json({ error: "Stripe not configured" }, { status: 500 });
@@ -93,6 +96,19 @@ export async function POST(req: NextRequest) {
             amountRefundedCents: charge.amount_refunded ?? 0,
           });
         }
+        break;
+      }
+      case "charge.dispute.created":
+      case "charge.dispute.updated":
+      case "charge.dispute.closed":
+      case "charge.dispute.funds_withdrawn":
+      case "charge.dispute.funds_reinstated": {
+        // The whole point of the Prevent integration is that these stop
+        // arriving. Recording them is how we find out whether it works —
+        // and, when one does arrive, whether the schemes ever asked us about
+        // the purchase first.
+        const dispute = event.data.object as Stripe.Dispute;
+        await recordDispute({ db, dispute });
         break;
       }
       case "invoice.payment_failed": {
