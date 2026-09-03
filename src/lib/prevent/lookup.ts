@@ -243,25 +243,83 @@ function buildCascade(input: MatchInput): Step[] {
 }
 
 /**
- * Fetch up to a handful of candidates for one cascade step.
+ * Ceiling on the candidate union.
  *
- * The limit is small but greater than two: one row is a match and two is
- * ambiguous, but a few extra let `disambiguate()` try to break the tie before
- * we give up on the step.
+ * The union is dominated by the widest step (amount + date), which on our
+ * traffic returns well under a hundred rows for a six-day window. The cap
+ * exists so a pathological request cannot pull the table into memory; if it
+ * ever trips we would rather know than silently match against a truncated set.
  */
-async function runStep(db: DB, filters: Filter[]): Promise<PurchaseRecord[]> {
-  let query = db.from("purchases").select(PURCHASE_COLUMNS);
-  for (const f of filters) {
-    if (f.op === "eq") query = query.eq(f.col, f.val);
-    else if (f.op === "gte") query = query.gte(f.col, f.val);
-    else query = query.lte(f.col, f.val);
-  }
-  const { data, error } = await query.limit(10);
+const CANDIDATE_LIMIT = 500;
+
+/** PostgREST reserves `,` `.` `(` `)` inside a filter value; quoting sidesteps all of it. */
+function quote(value: string | number): string {
+  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/** One cascade step as a PostgREST `and(...)` group. */
+function toOrGroup(filters: Filter[]): string {
+  return `and(${filters.map((f) => `${f.col}.${f.op}.${quote(f.val)}`).join(",")})`;
+}
+
+/**
+ * Evaluate one step's filters against an already-fetched row.
+ *
+ * Mirrors what Postgres would have done for the same `Filter[]`, which is why
+ * both sides are generated from the same structure rather than written twice.
+ * A null column never satisfies a comparison, matching SQL's three-valued
+ * logic — in Postgres `NULL = '9604'` is NULL, not true.
+ */
+function matches(row: PurchaseRecord, filters: Filter[]): boolean {
+  return filters.every((f) => {
+    const actual = (row as unknown as Record<string, unknown>)[f.col];
+    if (actual === null || actual === undefined) return false;
+
+    if (f.op === "eq") {
+      return typeof f.val === "number"
+        ? Number(actual) === f.val
+        : String(actual) === String(f.val);
+    }
+
+    // gte/lte only ever carry timestamps. Compare as instants: the stored value
+    // ends "+00:00" and the bound ends "Z", so a string compare would be wrong.
+    const a = Date.parse(String(actual));
+    const b = Date.parse(String(f.val));
+    if (Number.isNaN(a) || Number.isNaN(b)) {
+      return f.op === "gte" ? String(actual) >= String(f.val) : String(actual) <= String(f.val);
+    }
+    return f.op === "gte" ? a >= b : a <= b;
+  });
+}
+
+/**
+ * Fetch the union of every cascade step in one request.
+ *
+ * Each step used to be its own round trip. That was the single largest cost in
+ * the endpoint: a Visa OI lookup builds eight steps, and eight sequential trips
+ * to Supabase put us past the scheme's 1000 ms budget before we had an answer.
+ * Issuing them concurrently helped but still meant eight connections — and on a
+ * cold instance, eight TLS handshakes. One OR'd query is one connection, and
+ * the cascade is then walked in memory over the rows it returns.
+ */
+async function fetchCandidates(db: DB, steps: Step[]): Promise<PurchaseRecord[]> {
+  const { data, error } = await db
+    .from("purchases")
+    .select(PURCHASE_COLUMNS)
+    .or(steps.map((s) => toOrGroup(s.filters)).join(","))
+    .limit(CANDIDATE_LIMIT);
+
   if (error) {
-    console.error("[prevent] lookup step failed:", error);
+    console.error("[prevent] candidate fetch failed:", error);
     return [];
   }
-  return (data ?? []) as unknown as PurchaseRecord[];
+  const rows = (data ?? []) as unknown as PurchaseRecord[];
+  if (rows.length === CANDIDATE_LIMIT) {
+    console.warn(
+      `[prevent] candidate set hit the ${CANDIDATE_LIMIT}-row cap; a match may have been truncated away`,
+    );
+  }
+  return rows;
 }
 
 /** Uppercase alphanumerics only — "FACELINEAGE.COM" and "FACELINEAGE COM" agree. */
@@ -326,22 +384,18 @@ function disambiguate(rows: PurchaseRecord[], input: MatchInput): PurchaseRecord
  */
 export async function findPurchase(db: DB, input: MatchInput): Promise<MatchOutcome> {
   const cascade = buildCascade(input);
+  if (cascade.length === 0) return { outcome: "not_found", strategy: null };
 
-  // Every step is an independent, read-only query, so they are issued together
-  // and the results are then walked in priority order. Awaiting them one at a
-  // time was costing a full Supabase round trip per step: a Visa OI lookup
-  // builds eight steps, which at ~200 ms each put the floor at ~1.6 s against a
-  // 1000 ms budget — the schemes scored the answer as a timeout and the
-  // cardholder saw nothing. Answering late is indistinguishable from not
-  // answering, so predictable latency matters more here than the queries saved
-  // by stopping early.
-  const results = await Promise.all(cascade.map((step) => runStep(db, step.filters)));
+  // One round trip for every step, then the same priority walk as before over
+  // the rows it returned. Order and tie-breaking are unchanged; only the number
+  // of trips to the database moves.
+  const candidates = await fetchCandidates(db, cascade);
 
   let sawMultiple: string | null = null;
 
   for (let i = 0; i < cascade.length; i++) {
-    const { strategy } = cascade[i];
-    const rows = results[i];
+    const { strategy, filters } = cascade[i];
+    const rows = candidates.filter((row) => matches(row, filters));
 
     if (rows.length === 1) {
       return { outcome: "found", purchase: rows[0], strategy };
