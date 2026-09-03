@@ -325,10 +325,24 @@ function disambiguate(rows: PurchaseRecord[], input: MatchInput): PurchaseRecord
  * an exact match on indexed columns; nothing here is fuzzy.
  */
 export async function findPurchase(db: DB, input: MatchInput): Promise<MatchOutcome> {
+  const cascade = buildCascade(input);
+
+  // Every step is an independent, read-only query, so they are issued together
+  // and the results are then walked in priority order. Awaiting them one at a
+  // time was costing a full Supabase round trip per step: a Visa OI lookup
+  // builds eight steps, which at ~200 ms each put the floor at ~1.6 s against a
+  // 1000 ms budget — the schemes scored the answer as a timeout and the
+  // cardholder saw nothing. Answering late is indistinguishable from not
+  // answering, so predictable latency matters more here than the queries saved
+  // by stopping early.
+  const results = await Promise.all(cascade.map((step) => runStep(db, step.filters)));
+
   let sawMultiple: string | null = null;
 
-  for (const { strategy, filters } of buildCascade(input)) {
-    const rows = await runStep(db, filters);
+  for (let i = 0; i < cascade.length; i++) {
+    const { strategy } = cascade[i];
+    const rows = results[i];
+
     if (rows.length === 1) {
       return { outcome: "found", purchase: rows[0], strategy };
     }
