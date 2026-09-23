@@ -368,6 +368,40 @@ function disambiguate(rows: PurchaseRecord[], input: MatchInput): PurchaseRecord
   return candidates;
 }
 
+/** Case-insensitive: Visa sends "08945C", Stripe stores "08945c" on some brands. */
+function differs(mine: string | null, theirs: string | undefined): boolean {
+  return Boolean(mine && theirs) && mine!.toUpperCase() !== theirs!.toUpperCase();
+}
+
+/**
+ * Drop candidates the issuer's own request rules out.
+ *
+ * The weak steps match on last4 + amount + a ±3 day window, which cannot tell
+ * two charges on the same card for the same price apart. That is not
+ * hypothetical: we answered a real OI lookup for transaction
+ * 586231183910082 with the details of a *different* $24.99 charge on the same
+ * card four hours earlier, because the one Visa asked about had never been
+ * written to `purchases` at all. The cardholder would have been shown an order
+ * they did not recognise — the exact outcome this file exists to prevent.
+ *
+ * Stripe's `network_transaction_id` is the same value Visa sends as
+ * `transactionId`; that holds exactly on every recorded transaction an issuer
+ * has asked us about, as does the auth code. So when both sides carry an
+ * identifier and they disagree, the row is positively the wrong transaction,
+ * not merely an unproven one.
+ *
+ * A null on either side is silence, not disagreement, and never vetoes: most
+ * of our rows still have no ARN at all, and the strong identifiers are absent
+ * from many lookups.
+ */
+function contradicted(row: PurchaseRecord, input: MatchInput): boolean {
+  return (
+    differs(row.network_transaction_id, input.networkTransactionId) ||
+    differs(row.acquirer_reference_number, input.arn) ||
+    differs(row.auth_code, input.authCode)
+  );
+}
+
 /**
  * Find the single purchase an issuer is asking about.
  *
@@ -389,7 +423,18 @@ export async function findPurchase(db: DB, input: MatchInput): Promise<MatchOutc
   // One round trip for every step, then the same priority walk as before over
   // the rows it returned. Order and tie-breaking are unchanged; only the number
   // of trips to the database moves.
-  const candidates = await fetchCandidates(db, cascade);
+  const fetched = await fetchCandidates(db, cascade);
+
+  // Applied to the whole candidate set rather than per step: a row the issuer's
+  // own identifiers rule out is the wrong transaction no matter which step
+  // surfaced it.
+  const candidates = fetched.filter((row) => !contradicted(row, input));
+  if (candidates.length < fetched.length) {
+    console.log(
+      `[prevent] vetoed ${fetched.length - candidates.length} candidate(s) contradicting the ` +
+        `issuer's identifiers (txnId/arn/authCode)`,
+    );
+  }
 
   let sawMultiple: string | null = null;
 
