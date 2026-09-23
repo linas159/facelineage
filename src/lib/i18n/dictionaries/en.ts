@@ -328,7 +328,7 @@ export const en = {
     introCharge: "Today's charge covers your {period} access.",
     oneTimePurchase: "One-time purchase.",
     chargedToday: "Charged today",
-    renewalNote: "After {days} days, you'll be charged {price} for a month of access.",
+    renewalNote: "After {days} days, you'll be charged {price} for a month of access. Cancel anytime. To request a refund, email support@facelineage.com.",
     orPayWithCard: "or pay with card",
     pay: "Pay {price}",
     processing: "Processing…",
