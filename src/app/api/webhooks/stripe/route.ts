@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import type Stripe from "stripe";
-import { stripe, PLANS, resolveCustomerEmail, type PlanKey } from "@/lib/stripe";
+import {
+  stripe,
+  PLANS,
+  resolveCustomerEmail,
+  priceAmountFor,
+  isCurrency,
+  formatPrice,
+  type Currency,
+  type PlanKey,
+} from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { runUpsellPipeline, type UpsellSku } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
@@ -9,6 +18,8 @@ import { capturePaymentEvidence, captureRefund } from "@/lib/prevent/evidence";
 import { recordDispute } from "@/lib/prevent/disputes";
 import { provisionIntroPayment } from "@/lib/provisioning";
 import { getOrCreateAuthUser } from "@/lib/auth-user";
+import { sendSubscriptionCanceledEmail } from "@/lib/email/send";
+import { formatChargeMoment } from "@/lib/email/templates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +35,8 @@ export const maxDuration = 300;
  *  - payment_intent.succeeded
  *      ↳ kind=intro_fee   → start subscription w/ trial, fire main AI pipeline
  *      ↳ kind=upsell      → record purchase, fire upsell pipeline
- *  - customer.subscription.updated/created/deleted → mirror state
+ *  - customer.subscription.updated/created/deleted → mirror state, and email
+ *    the customer a cancellation confirmation when they cancel it themselves
  *  - invoice.payment_failed → past_due
  *  - charge.refunded → mirror refund onto the purchase (dispute-prevention
  *    lookups read it back; see @/lib/prevent)
@@ -67,10 +79,27 @@ export async function POST(req: NextRequest) {
         await handleInvoicePaid(invoice, db);
         break;
       }
-      case "customer.subscription.updated":
       case "customer.subscription.created": {
         const sub = event.data.object as Stripe.Subscription;
         await upsertSubscription(sub, db);
+        break;
+      }
+      case "customer.subscription.updated": {
+        const sub = event.data.object as Stripe.Subscription;
+        await upsertSubscription(sub, db);
+        // A Portal cancellation arrives here, not on `.deleted`: the sub keeps
+        // running until the period ends. Confirm it the moment they ask, not
+        // days later when it lapses.
+        const prev = event.data.previous_attributes as
+          | Partial<Stripe.Subscription>
+          | undefined;
+        if (justScheduledCancellation(sub, prev)) {
+          await confirmCancellation({
+            sub,
+            db,
+            endsAt: sub.cancel_at ?? sub.current_period_end ?? null,
+          });
+        }
         break;
       }
       case "customer.subscription.deleted": {
@@ -79,6 +108,10 @@ export async function POST(req: NextRequest) {
           .from("subscriptions")
           .update({ status: "canceled", canceled_at: new Date().toISOString() })
           .eq("stripe_subscription_id", sub.id);
+        // Immediate cancellations only ever surface here. One that was
+        // scheduled earlier also lands here when it finally lapses — already
+        // confirmed then, and the send-once claim inside keeps it to one email.
+        await confirmCancellation({ sub, db, endsAt: null });
         break;
       }
       case "charge.refunded": {
@@ -411,6 +444,149 @@ async function upsertSubscription(
       current_period_start: epochToIso(sub.current_period_start),
       current_period_end: epochToIso(sub.current_period_end),
       cancel_at: epochToIso(sub.cancel_at),
+      // Back to a plain running subscription (the customer reactivated in the
+      // Portal) → drop the send-once stamp, so if they cancel again later they
+      // get confirmed again.
+      ...(isCanceling(sub) ? {} : { cancel_email_sent_at: null }),
     })
     .eq("stripe_subscription_id", sub.id);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Cancellation confirmation
+//
+// A customer who cancels and hears nothing back can't tell whether it worked.
+// The cheap outcome of that doubt is a support email; the expensive one is a
+// chargeback. So every self-serve cancellation gets a receipt naming the exact
+// moment access ends and stating that nothing more will be charged.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Scheduled to stop — either Portal's "cancel at period end" or a hard date. */
+function isCanceling(sub: Stripe.Subscription): boolean {
+  return sub.cancel_at_period_end === true || sub.cancel_at != null;
+}
+
+/**
+ * True only for the update that FLIPPED the subscription into canceling.
+ * `customer.subscription.updated` fires for every billing-cycle tick and
+ * payment-method change too, and each one carries `cancel_at_period_end: true`
+ * once it's set — so the state alone can't tell us a cancellation just
+ * happened. Stripe's `previous_attributes` diff can.
+ */
+function justScheduledCancellation(
+  sub: Stripe.Subscription,
+  prev: Partial<Stripe.Subscription> | undefined,
+): boolean {
+  if (!isCanceling(sub) || !prev) return false;
+  return prev.cancel_at_period_end === false || ("cancel_at" in prev && prev.cancel_at == null);
+}
+
+async function confirmCancellation(opts: {
+  sub: Stripe.Subscription;
+  db: ReturnType<typeof createServiceClient>;
+  /** When access ends (unix). null = already over. */
+  endsAt: number | null;
+}) {
+  const { sub, db, endsAt } = opts;
+
+  // Only cancellations the CUSTOMER asked for. Stripe also cancels
+  // subscriptions on our behalf — dunning failures (`payment_failed`) and
+  // disputes (`payment_disputed`) — and telling someone whose card just
+  // bounced that their cancellation is confirmed is both wrong and the kind of
+  // contradiction an issuer reads badly.
+  if (sub.cancellation_details?.reason !== "cancellation_requested") {
+    console.log(
+      `[cancel-email] sub=${sub.id} reason=${sub.cancellation_details?.reason ?? "(none)"} — not customer-initiated, skipping`,
+    );
+    return;
+  }
+
+  // Atomic claim, and the paid-customer guard in one query: a `subscriptions`
+  // row exists only for a subscription we actually charged (written by
+  // provisionIntroPayment on invoice.paid). That excludes the abandoned
+  // dual-checkout sibling we cancel ourselves in provisioning — which is a
+  // `cancellation_requested` cancellation of a subscription the customer never
+  // paid for and must never be emailed about.
+  const { data: claimed } = await db
+    .from("subscriptions")
+    .update({ cancel_email_sent_at: new Date().toISOString() })
+    .eq("stripe_subscription_id", sub.id)
+    .is("cancel_email_sent_at", null)
+    .select("user_id")
+    .maybeSingle();
+  if (!claimed) {
+    console.log(`[cancel-email] sub=${sub.id} — no unclaimed paid subscription row, skipping`);
+    return;
+  }
+
+  const release = async () => {
+    await db
+      .from("subscriptions")
+      .update({ cancel_email_sent_at: null })
+      .eq("stripe_subscription_id", sub.id);
+  };
+
+  const customer = await customerOf(sub);
+  const email = customer?.email ?? (await profileEmail(db, claimed.user_id));
+  if (!email) {
+    console.error(`[cancel-email] no email for sub=${sub.id} — skipping`);
+    await release();
+    return;
+  }
+
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://facelineage.com";
+  const sent = await sendSubscriptionCanceledEmail(email, {
+    firstName: customer?.name?.trim().split(/\s+/)[0] || undefined,
+    // The moment, not the day — same reason the trial receipt names it: the
+    // customer's record of when access ends can't be vague.
+    accessUntil: endsAt && endsAt * 1000 > Date.now() ? formatChargeMoment(endsAt) : undefined,
+    canceledAmount: recurringAmountOf(sub),
+    manageUrl: `${baseUrl}/account`,
+  });
+  if (!sent) {
+    // Let a webhook retry (or the later `.deleted` event) have another go.
+    await release();
+    return;
+  }
+  console.log(`[cancel-email] confirmed cancellation to=${email} sub=${sub.id} endsAt=${endsAt ?? "(now)"}`);
+}
+
+/** "$24.99/week" for the subscription's own price + currency, if resolvable. */
+function recurringAmountOf(sub: Stripe.Subscription): string | undefined {
+  const price = sub.items?.data[0]?.price;
+  if (!price) return undefined;
+  const currency: Currency = isCurrency(sub.currency) ? sub.currency : "usd";
+  // `currency_options` isn't expanded on webhook payloads, so a subscription
+  // billed in a non-default currency can only be priced from unit_amount —
+  // which would be the wrong number. Quote nothing rather than the wrong sum.
+  if (price.currency !== currency && !price.currency_options) return undefined;
+  const cents = priceAmountFor(price, currency);
+  if (!cents) return undefined;
+  const interval = price.recurring?.interval;
+  return `${formatPrice(cents, currency, "en")}${interval ? `/${interval}` : ""}`;
+}
+
+async function customerOf(sub: Stripe.Subscription): Promise<Stripe.Customer | null> {
+  const id = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
+  if (!id) return null;
+  try {
+    const customer = await stripe.customers.retrieve(id);
+    return customer.deleted ? null : customer;
+  } catch (err) {
+    console.error(`[cancel-email] customer retrieve failed for ${id}:`, err);
+    return null;
+  }
+}
+
+async function profileEmail(
+  db: ReturnType<typeof createServiceClient>,
+  userId: string | null,
+): Promise<string | undefined> {
+  if (!userId) return undefined;
+  const { data } = await db
+    .from("profiles")
+    .select("email")
+    .eq("id", userId)
+    .maybeSingle();
+  return data?.email ?? undefined;
 }

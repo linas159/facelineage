@@ -388,6 +388,188 @@ export function calendarDaysUntil(toUnix: number, fromUnix: number): number {
   return Math.floor(toUnix / 86_400) - Math.floor(fromUnix / 86_400);
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Cancellation confirmation — sent when the customer cancels their own
+// subscription (Stripe Customer Portal). Two shapes, one template:
+//   • access continues until `accessUntil` (the usual "cancel at period end"),
+//   • access already ended (an immediate cancellation).
+//
+// This email exists to be the receipt for a cancellation. A customer who
+// cancels and hears nothing back has no way to know it worked, so they either
+// email support or — the expensive outcome — call their bank. Everything in
+// here is stated in the terms that make the cancellation verifiable: what was
+// canceled, the exact moment access ends, and the plain promise that the card
+// will not be charged again.
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface SubscriptionCanceledEmailVars {
+  firstName?: string;
+  /**
+   * The exact moment access ends: "June 15, 2026 at 6:07 PM UTC". Omitted when
+   * the cancellation took effect immediately and access is already over.
+   */
+  accessUntil?: string;
+  /** The charge that will no longer happen: "$24.99/week". Optional. */
+  canceledAmount?: string;
+  manageUrl: string;      // https://facelineage.com/account
+}
+
+export function renderSubscriptionCanceledEmail(v: SubscriptionCanceledEmailVars): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const hello = v.firstName ? `Hi ${escape(v.firstName)},` : "Hello,";
+  const until = v.accessUntil ? escape(v.accessUntil) : null;
+
+  const subject = "Your Facelineage subscription is canceled";
+
+  const headline = "Your subscription is canceled";
+  const subhead = until
+    ? `You won&rsquo;t be charged again. You keep full access until ${until}.`
+    : "You won&rsquo;t be charged again, and your access has ended.";
+
+  const lead = until
+    ? `We&rsquo;ve canceled your Facelineage subscription${v.canceledAmount ? ` (${escape(v.canceledAmount)})` : ""}. No further payments will be taken. Your access stays open until <strong style="color:${BRAND.ink};">${until}</strong> — after that the subscription simply ends, with nothing left to cancel.`
+    : `We&rsquo;ve canceled your Facelineage subscription${v.canceledAmount ? ` (${escape(v.canceledAmount)})` : ""}, effective immediately. No further payments will be taken.`;
+
+  const amountRow = v.canceledAmount
+    ? `<tr>
+                    <td style="padding:4px 0;">Recurring charge</td>
+                    <td align="right" style="padding:4px 0;color:${BRAND.ink};text-decoration:line-through;">${escape(v.canceledAmount)}</td>
+                  </tr>`
+    : "";
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${subject}</title>
+</head>
+<body style="margin:0;padding:0;background:${BRAND.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.ink};">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+    Your cancellation is confirmed. You won&rsquo;t be charged again${until ? `, and you keep access until ${until}` : ""}.
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.bg};padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
+
+          <!-- Header / hero -->
+          <tr>
+            <td style="padding:0 0 16px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,${BRAND.violet} 0%,${BRAND.magenta} 100%);border-radius:24px 24px 0 0;padding:40px 32px 48px 32px;text-align:center;">
+                <tr>
+                  <td align="center">
+                    <div style="font-size:13px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.85);">Facelineage</div>
+                    <div style="margin-top:16px;font-size:28px;font-weight:800;line-height:1.18;color:#ffffff;letter-spacing:-0.01em;">
+                      ${headline}
+                    </div>
+                    <div style="margin-top:12px;font-size:15px;line-height:1.45;color:rgba(255,255,255,0.92);">
+                      ${subhead}
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Main card -->
+          <tr>
+            <td style="background:${BRAND.cardBg};border-radius:24px;padding:36px 28px;box-shadow:0 8px 32px rgba(124,92,255,0.08);">
+
+              <p style="margin:0 0 12px 0;font-size:16px;color:${BRAND.ink};font-weight:600;">${hello}</p>
+              <p style="margin:0 0 22px 0;font-size:15px;line-height:1.6;color:${BRAND.inkSoft};">
+                ${lead}
+              </p>
+
+              <!-- Cancellation summary -->
+              <div style="margin:0 0 24px 0;padding:20px;background:${BRAND.pale};border-radius:16px;">
+                <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${BRAND.violetDeep};margin-bottom:12px;">Cancellation summary</div>
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;color:${BRAND.inkSoft};">
+                  <tr>
+                    <td style="padding:4px 0;">Status</td>
+                    <td align="right" style="padding:4px 0;font-weight:700;color:${BRAND.ink};">Canceled</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:4px 0;">Access ${until ? "until" : "ended"}</td>
+                    <td align="right" style="padding:4px 0;color:${BRAND.ink};">${until ?? "Now"}</td>
+                  </tr>
+                  ${amountRow}
+                  <tr>
+                    <td style="padding:4px 0;">Future charges</td>
+                    <td align="right" style="padding:4px 0;font-weight:700;color:${BRAND.ink};">None</td>
+                  </tr>
+                </table>
+              </div>
+
+              <p style="margin:0 0 22px 0;font-size:14px;line-height:1.6;color:${BRAND.inkSoft};">
+                Nothing else is needed from you. If you see a Facelineage charge after this email, reply to it or write to
+                <a href="mailto:support@facelineage.com" style="color:${BRAND.violet};text-decoration:none;font-weight:700;">support@facelineage.com</a>
+                and we&rsquo;ll refund it.
+              </p>
+
+              <!-- Come back whenever -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" style="padding:0 0 8px 0;">
+                    <a href="${escape(v.manageUrl)}" style="display:inline-block;padding:15px 30px;background:${BRAND.violet};color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;border-radius:14px;box-shadow:0 4px 16px rgba(124,92,255,0.32);">
+                      View my account →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:10px 0 0 0;font-size:13px;line-height:1.6;color:${BRAND.inkMuted};text-align:center;">
+                Changed your mind? You can start again any time from your account — your reports stay where you left them.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:24px 16px 0 16px;text-align:center;font-size:12px;color:${BRAND.inkMuted};line-height:1.6;">
+              Questions? Reply to this email or write to <a href="mailto:support@facelineage.com" style="color:${BRAND.violet};text-decoration:none;font-weight:600;">support@facelineage.com</a>.<br />
+              <span style="display:inline-block;margin-top:10px;">
+                <a href="${escape(v.manageUrl)}" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Account</a>
+                <a href="https://facelineage.com/refunds" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Refund policy</a>
+                <a href="https://facelineage.com/terms" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Terms</a>
+                <a href="https://facelineage.com/privacy" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Privacy</a>
+              </span>
+              <div style="margin-top:14px;">© ${new Date().getFullYear()} Facelineage</div>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const text = [
+    hello.replace(",", ""),
+    "",
+    "Your Facelineage subscription is canceled.",
+    v.canceledAmount
+      ? `You will not be charged ${v.canceledAmount} again — or anything else.`
+      : "You will not be charged again.",
+    v.accessUntil
+      ? `You keep full access until ${v.accessUntil}. After that the subscription ends on its own.`
+      : "Your access has ended, effective immediately.",
+    "",
+    "Nothing else is needed from you. If you ever see a Facelineage charge after this email,",
+    "write to support@facelineage.com and we'll refund it.",
+    "",
+    `Changed your mind? Start again any time: ${v.manageUrl}`,
+    "",
+    "— Facelineage",
+  ].join("\n");
+
+  return { subject, html, text };
+}
+
 function row(icon: string, title: string, desc: string): string {
   return `<tr>
     <td valign="top" style="padding:6px 0;width:36px;font-size:20px;">${icon}</td>
