@@ -17,6 +17,7 @@ import { preloadCheckoutInit } from "@/lib/preload-checkout";
 import { PayPalButton } from "@/components/paypal-button";
 import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
 import { capture } from "@/lib/posthog/client";
+import { usePayPalVisibility } from "@/lib/posthog/use-paypal-hidden";
 
 type Mode = "intro" | "upsell";
 type UpsellId = "parents" | "ethnicity" | "ages" | "partner" | "book";
@@ -104,6 +105,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
   const { t, locale } = useI18n();
   const [init, setInit] = useState<CheckoutInit | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const paypal = usePayPalVisibility();
 
   useEffect(() => {
     let cancelled = false;
@@ -223,8 +225,14 @@ export function CheckoutClient(props: CheckoutClientProps) {
           }}
         >
           <div className="space-y-2">
-            <ExpressSection redirectTarget={redirectTarget} />
-            {currencySupportsPayPal(init.currency) && (
+            {/* Remount when PayPal visibility flips — ExpressCheckoutElement
+                doesn't reliably pick up paymentMethods changes in place. */}
+            <ExpressSection
+              key={paypal.show ? "paypal-on" : "paypal-off"}
+              redirectTarget={redirectTarget}
+              showPayPal={paypal.show}
+            />
+            {paypal.show && currencySupportsPayPal(init.currency) && (
               <PayPalButton
                 clientSecret={init.walletsClientSecret ?? init.clientSecret!}
                 returnUrl={redirectTarget}
@@ -280,7 +288,13 @@ export function CheckoutClient(props: CheckoutClientProps) {
 // Wallets section (Express Checkout)
 // ────────────────────────────────────────────────────────────────────────────
 
-function ExpressSection({ redirectTarget }: { redirectTarget: string }) {
+function ExpressSection({
+  redirectTarget,
+  showPayPal,
+}: {
+  redirectTarget: string;
+  showPayPal: boolean;
+}) {
   const stripe = useStripe();
   const elements = useElements();
 
@@ -304,7 +318,7 @@ function ExpressSection({ redirectTarget }: { redirectTarget: string }) {
         paymentMethods: {
           applePay: "auto",
           googlePay: "auto",
-          paypal: "auto",
+          paypal: showPayPal ? "auto" : "never",
           link: "auto",
           amazonPay: "never",
           klarna: "never",

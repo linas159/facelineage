@@ -1,3 +1,7 @@
+"use client";
+
+import { usePayPalVisibility } from "@/lib/posthog/use-paypal-hidden";
+
 /**
  * Trust strip beneath the unlock button — a horizontal row of payment-brand
  * SVG badges loaded from /public/strip/. The SVGs already include their own
@@ -16,6 +20,11 @@ const LOGOS: { src: string; alt: string }[] = [
 ];
 
 export function PaymentTrustStrip({ heading }: { heading: string }) {
+  const paypal = usePayPalVisibility();
+  const logos = paypal.show
+    ? LOGOS
+    : LOGOS.filter((logo) => logo.alt !== "PayPal");
+
   return (
     <div className="mb-3 flex flex-col items-center gap-2">
       <p className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-soft)]">
@@ -39,7 +48,7 @@ export function PaymentTrustStrip({ heading }: { heading: string }) {
         {heading}
       </p>
       <div className="flex flex-wrap items-center justify-center gap-1.5">
-        {LOGOS.map((logo) => (
+        {logos.map((logo) => (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
             key={logo.src}
