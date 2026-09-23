@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { FunnelShell } from "@/components/funnel-shell";
 import { CheckoutClient } from "./checkout-client";
-import { PLANS, type PlanKey } from "@/lib/stripe";
+import { LEGACY_PLAN_REPLACEMENT, isSellablePlan, type PlanKey } from "@/lib/stripe";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,11 @@ export default async function CheckoutPage({
   // Intro flow: guest-friendly. No auth needed — email is collected here.
   if (params.plan && params.analysis) {
     const plan = params.plan as PlanKey;
-    if (!PLANS[plan]) redirect("/paywall");
+    const replacement = LEGACY_PLAN_REPLACEMENT[plan];
+    if (replacement) {
+      redirect(`/checkout?plan=${replacement}&analysis=${encodeURIComponent(params.analysis)}`);
+    }
+    if (!isSellablePlan(plan)) redirect("/paywall");
     return (
       <FunnelShell showBack backHref="/paywall">
         <CheckoutClient mode="intro" plan={plan} analysisId={params.analysis} />

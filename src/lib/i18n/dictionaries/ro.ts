@@ -332,6 +332,7 @@ export const ro: Dictionary = {
     introCharge: "Plata de azi acoperă accesul tău pentru {period}.",
     oneTimePurchase: "Achiziție unică.",
     chargedToday: "Plătit azi",
+    renewalNote: "După {days} zile vei fi taxat cu {price} pentru o lună de acces.",
     orPayWithCard: "sau plătește cu card",
     pay: "Plătește {price}",
     processing: "Se procesează…",

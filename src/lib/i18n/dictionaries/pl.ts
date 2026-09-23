@@ -316,6 +316,7 @@ export const pl: Dictionary = {
     introCharge: "Dzisiejsza płatność pokrywa Twój dostęp na {period}.",
     oneTimePurchase: "Zakup jednorazowy.",
     chargedToday: "Pobrano dziś",
+    renewalNote: "Po {days} dniach zostanie pobrana opłata {price} za miesiąc dostępu.",
     orPayWithCard: "lub zapłać kartą",
     pay: "Zapłać {price}",
     processing: "Przetwarzanie…",

@@ -146,6 +146,7 @@ export const PLANS = {
     introPeriod: "3 days",
     recurringInterval: "week" as const,
     recurringPeriod: "week",
+    sellable: false,
     intro: { usd: 195, eur: 195, ron: 700, pln: 799 } satisfies Amounts,
     recurring: { usd: 2499, eur: 2499, ron: 9900, pln: 9999 } satisfies Amounts,
     original: { usd: 995, eur: 995, ron: 3900, pln: 3999 } satisfies Amounts,
@@ -156,8 +157,31 @@ export const PLANS = {
     introPeriod: "7 days",
     recurringInterval: "week" as const,
     recurringPeriod: "week",
+    sellable: false,
     intro: { usd: 395, eur: 395, ron: 1500, pln: 1599 } satisfies Amounts,
     recurring: { usd: 2499, eur: 2499, ron: 9900, pln: 9999 } satisfies Amounts,
+    original: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 } satisfies Amounts,
+  },
+  sub_intro_3d_m: {
+    labelKey: "planLabel3d" as const,
+    introDays: 3,
+    introPeriod: "3 days",
+    recurringInterval: "month" as const,
+    recurringPeriod: "month",
+    sellable: true,
+    intro: { usd: 195, eur: 195, ron: 700, pln: 799 } satisfies Amounts,
+    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199 } satisfies Amounts,
+    original: { usd: 995, eur: 995, ron: 3900, pln: 3999 } satisfies Amounts,
+  },
+  sub_intro_7d_m: {
+    labelKey: "planLabel7d" as const,
+    introDays: 7,
+    introPeriod: "7 days",
+    recurringInterval: "month" as const,
+    recurringPeriod: "month",
+    sellable: true,
+    intro: { usd: 395, eur: 395, ron: 1500, pln: 1599 } satisfies Amounts,
+    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199 } satisfies Amounts,
     original: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 } satisfies Amounts,
   },
   sub_intro_1m: {
@@ -166,6 +190,7 @@ export const PLANS = {
     introPeriod: "1 month",
     recurringInterval: "month" as const,
     recurringPeriod: "month",
+    sellable: true,
     intro: { usd: 1395, eur: 1395, ron: 5500, pln: 5599 } satisfies Amounts,
     recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199 } satisfies Amounts,
     original: { usd: 3999, eur: 3999, ron: 15900, pln: 15999 } satisfies Amounts,
@@ -173,6 +198,19 @@ export const PLANS = {
 } as const;
 
 export type PlanKey = keyof typeof PLANS;
+
+/** New customers can only buy sellable plans. The weekly-renewing plans stay in
+ * PLANS so existing subscribers' product_sku still resolves to the right
+ * interval (account page, dispute-prevention data). */
+export function isSellablePlan(key: string): key is PlanKey {
+  return Object.hasOwn(PLANS, key) && PLANS[key as PlanKey].sellable;
+}
+
+/** Retired weekly plan → its monthly-renewing replacement, for stale links. */
+export const LEGACY_PLAN_REPLACEMENT: Partial<Record<PlanKey, PlanKey>> = {
+  sub_intro_3d: "sub_intro_3d_m",
+  sub_intro_7d: "sub_intro_7d_m",
+};
 
 /** Strikethrough "was" prices for upsells — UI-only marketing, not in Stripe. */
 export const UPSELL_ORIGINAL: Record<PriceSku, Amounts | null> = {

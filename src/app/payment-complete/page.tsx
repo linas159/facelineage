@@ -129,7 +129,7 @@ export default async function PaymentCompletePage({
           stripe.subscriptions.retrieve(subscriptionId),
         ]);
         const planMeta = subscription.metadata?.plan as PlanKey | undefined;
-        const plan = planMeta && PLANS[planMeta] ? planMeta : "sub_intro_3d";
+        const plan = planMeta && PLANS[planMeta] ? planMeta : "sub_intro_1m";
         await provisionIntroPayment({
           pi,
           pm,

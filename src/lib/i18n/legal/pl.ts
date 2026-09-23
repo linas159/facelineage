@@ -180,7 +180,7 @@ export const legalPl: LegalContent = {
       {
         kind: "ul",
         items: [
-          "Większość planów zaczyna się od płatnego okresu wprowadzającego (na przykład 7,99 zł za 3 dni), a następnie **odnawia się automatycznie** w cenie regularnej (na przykład 99,99 zł/tydzień), aż do anulowania. Dokładne ceny, okres wprowadzający i warunki odnowienia są pokazywane przed dokonaniem płatności.",
+          "Większość planów zaczyna się od płatnego okresu wprowadzającego (na przykład 7,99 zł za 3 dni), a następnie **odnawia się automatycznie** w cenie regularnej (na przykład 191,99 zł/miesiąc), aż do anulowania. Dokładne ceny, okres wprowadzający i warunki odnowienia są pokazywane przed dokonaniem płatności.",
           "Opłaty za odnowienie są pobierane automatycznie z zapisanej metody płatności. Przed każdym odnowieniem wysyłamy przypomnienie e-mailem.",
           "Możesz anulować w dowolnym momencie na [stronie konta](/account). Anulowanie wstrzymuje przyszłe opłaty i wchodzi w życie z końcem bieżącego opłaconego okresu; do tego czasu zachowujesz dostęp.",
           "Zakupy dodatków (np. Lustro Dziedzictwa, Przyszły Partner) to opłaty jednorazowe, pobierane natychmiast.",

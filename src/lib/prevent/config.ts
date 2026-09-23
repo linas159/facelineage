@@ -106,6 +106,20 @@ const CATALOG: Record<string, ProductInfo> = {
     url: `${APP_URL}/report`,
     recurring: true,
   },
+  sub_intro_3d_m: {
+    name: "Facelineage Report — 3-Day Access",
+    description: "Facelineage AI ancestry report, 3-day access then monthly plan",
+    type: "Subscription",
+    url: `${APP_URL}/report`,
+    recurring: true,
+  },
+  sub_intro_7d_m: {
+    name: "Facelineage Report — 7-Day Access",
+    description: "Facelineage AI ancestry report, 7-day access then monthly plan",
+    type: "Subscription",
+    url: `${APP_URL}/report`,
+    recurring: true,
+  },
   sub_intro_1m: {
     name: "Facelineage Report — 1-Month Access",
     description: "Facelineage AI ancestry report, 1-month access then monthly plan",

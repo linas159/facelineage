@@ -20,7 +20,7 @@ function initiateCheckoutEventId(analysisId: string, plan: string) {
   return `initiate_checkout_${analysisId}_${plan}`;
 }
 
-type PlanKey = "sub_intro_3d" | "sub_intro_7d" | "sub_intro_1m";
+type PlanKey = "sub_intro_3d_m" | "sub_intro_7d_m" | "sub_intro_1m";
 
 // Plan numbers come from PLANS in lib/stripe.ts (per-currency), labels +
 // period words from the dictionary. Per-locale price strings are computed
@@ -34,8 +34,8 @@ type PlanStatic = {
 };
 
 const PLAN_STATICS: PlanStatic[] = [
-  { key: "sub_intro_3d", labelKey: "planLabel3d", periodKey: "period3d", recurringPattern: "recurringWeekly",  badged: false },
-  { key: "sub_intro_7d", labelKey: "planLabel7d", periodKey: "period7d", recurringPattern: "recurringWeekly",  badged: true  },
+  { key: "sub_intro_3d_m", labelKey: "planLabel3d", periodKey: "period3d", recurringPattern: "recurringMonthly", badged: false },
+  { key: "sub_intro_7d_m", labelKey: "planLabel7d", periodKey: "period7d", recurringPattern: "recurringMonthly", badged: true  },
   { key: "sub_intro_1m", labelKey: "planLabel1m" , periodKey: "period1m", recurringPattern: "recurringMonthly", badged: false },
 ];
 
@@ -79,7 +79,7 @@ interface PaywallClientProps {
 export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
   const router = useRouter();
   const { t, locale } = useI18n();
-  const [selected, setSelected] = useState<PlanKey>("sub_intro_7d");
+  const [selected, setSelected] = useState<PlanKey>("sub_intro_7d_m");
   const [busy, setBusy] = useState(false);
   const [chargeError, setChargeError] = useState<string | null>(null);
   const [selfieSrc, setSelfieSrc] = useState<string | null>(null);

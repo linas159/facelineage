@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import {
   stripe,
   PLANS,
+  isSellablePlan,
   priceIdFor,
   pickCurrency,
   type PlanKey,
@@ -39,8 +40,8 @@ export async function POST(req: NextRequest) {
     analysisId?: string;
     locale?: string;
   };
+  if (!isSellablePlan(plan)) return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
   const planMeta = PLANS[plan];
-  if (!planMeta) return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
   if (!analysisId) {
     return NextResponse.json({ error: "Missing analysisId" }, { status: 400 });
   }

@@ -12,7 +12,7 @@ import {
 } from "@stripe/react-stripe-js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { PLANS, currencySupportsPayPal, type PlanKey } from "@/lib/stripe";
+import { PLANS, currencySupportsPayPal, type Currency, type PlanKey } from "@/lib/stripe";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
 import { PayPalButton } from "@/components/paypal-button";
 import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
@@ -161,11 +161,29 @@ export function CheckoutClient(props: CheckoutClientProps) {
   const PERIOD_KEY_BY_PLAN: Record<PlanKey, "period3d" | "period7d" | "period1m"> = {
     sub_intro_3d: "period3d",
     sub_intro_7d: "period7d",
+    sub_intro_3d_m: "period3d",
+    sub_intro_7d_m: "period7d",
     sub_intro_1m: "period1m",
   };
   const introPeriod =
     props.mode === "intro" && props.plan
       ? t.paywall[PERIOD_KEY_BY_PLAN[props.plan]] ?? PLANS[props.plan].introPeriod
+      : null;
+
+  // "After 7 days, you'll be charged $47.99 for a month of access." Only for
+  // monthly-renewing intro plans; the amount mirrors the Stripe recurring price.
+  const recurringPlan =
+    props.mode === "intro" && props.plan && PLANS[props.plan].recurringInterval === "month"
+      ? PLANS[props.plan]
+      : null;
+  const recurringCents =
+    recurringPlan && init ? recurringPlan.recurring[init.currency as Currency] : undefined;
+  const renewalNote =
+    recurringPlan && init && recurringCents != null
+      ? fmt(t.checkout.renewalNote, {
+          days: String(recurringPlan.introDays),
+          price: formatMoney(recurringCents, init.currency, locale),
+        })
       : null;
 
   // /api/checkout returns a fully-locale-prefixed returnUrl. The upsell
@@ -207,6 +225,9 @@ export function CheckoutClient(props: CheckoutClientProps) {
               {formatMoney(init.amount, init.currency, locale)}
             </span>
           </div>
+          {renewalNote && (
+            <p className="mt-1 text-xs text-[var(--color-ink-muted)]">{renewalNote}</p>
+          )}
         </Card>
       )}
 

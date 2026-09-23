@@ -188,7 +188,7 @@ export const legalEn: LegalContent = {
       {
         kind: "ul",
         items: [
-          "Most plans start with a paid intro period (for example, $1.95 for 3 days) and then **automatically renew** at the regular price (for example, $24.99/week) until you cancel. The exact prices, intro period, and renewal terms are shown to you at checkout before you pay.",
+          "Most plans start with a paid intro period (for example, $1.95 for 3 days) and then **automatically renew** at the regular price (for example, $47.99/month) until you cancel. The exact prices, intro period, and renewal terms are shown to you at checkout before you pay.",
           "Renewal charges are taken automatically using your saved payment method. We send you a reminder by email before each renewal.",
           "You can cancel at any time from your [account page](/account). Cancellation stops future charges and takes effect at the end of the current paid period; you keep access until then.",
           "Add-on purchases (e.g. Heritage Mirror, Future Partner) are one-time charges billed immediately.",
