@@ -39,6 +39,7 @@ export const en = {
     statsReports: "reports",
     statsRegions: "regions",
     statsAvgScan: "avg scan",
+    statsAvgScanValue: "6 sec",
     howItWorksEyebrow: "How it works",
     howItWorksHeading: "Three steps to your story",
     step1Title: "Tell us about you",

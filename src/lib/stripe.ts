@@ -52,7 +52,7 @@ export const UPSELL_SKU_BY_UI_ID = {
 // Currency / locale handling
 // ────────────────────────────────────────────────────────────────────────────
 
-export const SUPPORTED_CURRENCIES = ["usd", "eur", "ron", "pln"] as const;
+export const SUPPORTED_CURRENCIES = ["usd", "eur", "ron", "pln", "uah"] as const;
 export type Currency = (typeof SUPPORTED_CURRENCIES)[number];
 
 export const DEFAULT_CURRENCY: Currency = "usd";
@@ -70,6 +70,7 @@ const LOCALE_TO_CURRENCY: Record<string, Currency> = {
   en: "usd",
   ro: "ron",
   pl: "pln",
+  ua: "uah",
 };
 
 export function pickCurrency(locale: string | null | undefined): Currency {
@@ -82,6 +83,7 @@ const LOCALE_FOR_INTL: Record<string, string> = {
   en: "en-US",
   ro: "ro-RO",
   pl: "pl-PL",
+  ua: "uk-UA",
 };
 
 /**
@@ -96,12 +98,28 @@ export function formatPrice(
 ): string {
   const intlLocale = LOCALE_FOR_INTL[locale] ?? "en-US";
   const fractionDigits = cents % 100 === 0 ? 0 : 2;
+  if (currency === "uah" && locale === "ua") return formatUah(cents, fractionDigits);
   return new Intl.NumberFormat(intlLocale, {
     style: "currency",
     currency: currency.toUpperCase(),
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
   }).format(cents / 100);
+}
+
+/**
+ * "1 999 грн" / "26,33 грн". Hand-rolled because ICU builds disagree on the
+ * UAH symbol (Node: "₴", Chrome: "грн") and on the grouping space, which
+ * breaks hydration for prices rendered on both server and client.
+ */
+export function formatUah(cents: number, fractionDigits: 0 | 2 = 2): string {
+  const negative = cents < 0;
+  const abs = Math.abs(cents);
+  const whole = Math.floor(abs / 100)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, "\u00A0");
+  const frac = fractionDigits ? `,${String(abs % 100).padStart(2, "0")}` : "";
+  return `${negative ? "-" : ""}${whole}${frac}\u00A0грн`;
 }
 
 /**
@@ -162,9 +180,9 @@ export const PLANS = {
     recurringInterval: "week" as const,
     recurringPeriod: "week",
     sellable: false,
-    intro: { usd: 195, eur: 195, ron: 700, pln: 799 } satisfies Amounts,
-    recurring: { usd: 2499, eur: 2499, ron: 9900, pln: 9999 } satisfies Amounts,
-    original: { usd: 995, eur: 995, ron: 3900, pln: 3999 } satisfies Amounts,
+    intro: { usd: 195, eur: 195, ron: 700, pln: 799, uah: 7900 } satisfies Amounts,
+    recurring: { usd: 2499, eur: 2499, ron: 9900, pln: 9999, uah: 99900 } satisfies Amounts,
+    original: { usd: 995, eur: 995, ron: 3900, pln: 3999, uah: 39900 } satisfies Amounts,
   },
   sub_intro_7d: {
     labelKey: "planLabel7d" as const,
@@ -173,9 +191,9 @@ export const PLANS = {
     recurringInterval: "week" as const,
     recurringPeriod: "week",
     sellable: false,
-    intro: { usd: 395, eur: 395, ron: 1500, pln: 1599 } satisfies Amounts,
-    recurring: { usd: 2499, eur: 2499, ron: 9900, pln: 9999 } satisfies Amounts,
-    original: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 } satisfies Amounts,
+    intro: { usd: 395, eur: 395, ron: 1500, pln: 1599, uah: 16900 } satisfies Amounts,
+    recurring: { usd: 2499, eur: 2499, ron: 9900, pln: 9999, uah: 99900 } satisfies Amounts,
+    original: { usd: 1299, eur: 1299, ron: 4900, pln: 5199, uah: 54900 } satisfies Amounts,
   },
   sub_intro_3d_m: {
     labelKey: "planLabel3d" as const,
@@ -184,9 +202,9 @@ export const PLANS = {
     recurringInterval: "month" as const,
     recurringPeriod: "month",
     sellable: true,
-    intro: { usd: 195, eur: 195, ron: 700, pln: 799 } satisfies Amounts,
-    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199 } satisfies Amounts,
-    original: { usd: 995, eur: 995, ron: 3900, pln: 3999 } satisfies Amounts,
+    intro: { usd: 195, eur: 195, ron: 700, pln: 799, uah: 7900 } satisfies Amounts,
+    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199, uah: 199900 } satisfies Amounts,
+    original: { usd: 995, eur: 995, ron: 3900, pln: 3999, uah: 39900 } satisfies Amounts,
   },
   sub_intro_7d_m: {
     labelKey: "planLabel7d" as const,
@@ -195,9 +213,9 @@ export const PLANS = {
     recurringInterval: "month" as const,
     recurringPeriod: "month",
     sellable: true,
-    intro: { usd: 395, eur: 395, ron: 1500, pln: 1599 } satisfies Amounts,
-    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199 } satisfies Amounts,
-    original: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 } satisfies Amounts,
+    intro: { usd: 395, eur: 395, ron: 1500, pln: 1599, uah: 16900 } satisfies Amounts,
+    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199, uah: 199900 } satisfies Amounts,
+    original: { usd: 1299, eur: 1299, ron: 4900, pln: 5199, uah: 54900 } satisfies Amounts,
   },
   sub_intro_1m: {
     labelKey: "planLabel1m" as const,
@@ -206,9 +224,9 @@ export const PLANS = {
     recurringInterval: "month" as const,
     recurringPeriod: "month",
     sellable: true,
-    intro: { usd: 1395, eur: 1395, ron: 5500, pln: 5599 } satisfies Amounts,
-    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199 } satisfies Amounts,
-    original: { usd: 3999, eur: 3999, ron: 15900, pln: 15999 } satisfies Amounts,
+    intro: { usd: 1395, eur: 1395, ron: 5500, pln: 5599, uah: 59900 } satisfies Amounts,
+    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199, uah: 199900 } satisfies Amounts,
+    original: { usd: 3999, eur: 3999, ron: 15900, pln: 15999, uah: 169900 } satisfies Amounts,
   },
 } as const;
 
@@ -231,11 +249,11 @@ export const LEGACY_PLAN_REPLACEMENT: Partial<Record<PlanKey, PlanKey>> = {
 export const UPSELL_ORIGINAL: Record<PriceSku, Amounts | null> = {
   recur_week: null,
   recur_month: null,
-  upsell_v2_parents: { usd: 899, eur: 899, ron: 3500, pln: 3599 },
-  upsell_v2_ethnicity: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 },
-  upsell_v2_ages: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 },
-  upsell_v2_partner: { usd: 1299, eur: 1299, ron: 4900, pln: 5199 },
-  upsell_v2_book: { usd: 1799, eur: 1799, ron: 6900, pln: 7199 },
+  upsell_v2_parents: { usd: 899, eur: 899, ron: 3500, pln: 3599, uah: 34900 },
+  upsell_v2_ethnicity: { usd: 1299, eur: 1299, ron: 4900, pln: 5199, uah: 54900 },
+  upsell_v2_ages: { usd: 1299, eur: 1299, ron: 4900, pln: 5199, uah: 54900 },
+  upsell_v2_partner: { usd: 1299, eur: 1299, ron: 4900, pln: 5199, uah: 54900 },
+  upsell_v2_book: { usd: 1799, eur: 1799, ron: 6900, pln: 7199, uah: 74900 },
 };
 
 /**

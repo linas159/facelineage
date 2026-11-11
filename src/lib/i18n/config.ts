@@ -7,7 +7,7 @@
  * URL convention: the DEFAULT_LOCALE has no prefix (e.g. /quiz/1). All
  * other locales are accessed under `/{locale}/...` (e.g. /ro/quiz/1).
  */
-export const LOCALES = ["en", "ro", "pl"] as const;
+export const LOCALES = ["en", "ro", "pl", "ua"] as const;
 export type Locale = (typeof LOCALES)[number];
 
 export const DEFAULT_LOCALE: Locale = "en";
@@ -20,6 +20,19 @@ export const LOCALE_LABELS: Record<Locale, string> = {
   en: "English",
   ro: "Română",
   pl: "Polski",
+  ua: "Українська",
+};
+
+/**
+ * BCP-47 language tag per locale, for `<html lang>`. Differs from the URL
+ * prefix for Ukrainian: `/ua` is the user-facing prefix, `uk` is the ISO
+ * 639-1 language code browsers and screen readers expect.
+ */
+export const HTML_LANG: Record<Locale, string> = {
+  en: "en",
+  ro: "ro",
+  pl: "pl",
+  ua: "uk",
 };
 
 export function isLocale(s: string | null | undefined): s is Locale {

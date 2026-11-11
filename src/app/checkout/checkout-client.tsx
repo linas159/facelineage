@@ -16,6 +16,7 @@ import {
   PLANS,
   currencySupportsBlik,
   currencySupportsPayPal,
+  formatUah,
   type Currency,
   type PlanKey,
 } from "@/lib/stripe";
@@ -515,9 +516,11 @@ const INTL_LOCALE: Record<string, string> = {
   en: "en-US",
   ro: "ro-RO",
   pl: "pl-PL",
+  ua: "uk-UA",
 };
 
 function formatMoney(cents: number, currency: string, locale = "en"): string {
+  if (currency.toLowerCase() === "uah") return formatUah(cents, cents % 100 === 0 ? 0 : 2);
   return new Intl.NumberFormat(INTL_LOCALE[locale] ?? "en-US", {
     style: "currency",
     currency: currency.toUpperCase(),

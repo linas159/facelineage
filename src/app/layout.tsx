@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from "next";
-import { Outfit, Signika } from "next/font/google";
+import { Manrope, Outfit, Rubik, Signika } from "next/font/google";
 import { Suspense } from "react";
 import "./globals.css";
 import { getDictionary, getLocale } from "@/lib/i18n/server";
+import { HTML_LANG } from "@/lib/i18n/config";
 import { I18nProvider } from "@/lib/i18n/client";
 import { PixelLoader } from "@/lib/meta/pixel-loader";
 import { PostHogProvider } from "@/lib/posthog/provider";
@@ -19,6 +20,27 @@ const signika = Signika({
   weight: ["400", "500", "600", "700"],
   variable: "--font-signika",
   display: "swap",
+});
+
+// Outfit/Signika have no Cyrillic glyphs, so the Ukrainian locale swaps in
+// the closest Cyrillic-capable pair (see `html:lang(uk)` in globals.css).
+// Not preloaded: only /ua pages reference them. globals.css uses the literal
+// family names (not the variables) so glyphs these fonts lack (← →) fall
+// through to Outfit/system-ui instead of the generated Arial fallback face.
+const manrope = Manrope({
+  subsets: ["latin", "cyrillic"],
+  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-manrope",
+  display: "swap",
+  preload: false,
+});
+
+const rubik = Rubik({
+  subsets: ["latin", "cyrillic"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-rubik",
+  display: "swap",
+  preload: false,
 });
 
 export const viewport: Viewport = {
@@ -52,7 +74,12 @@ export default async function RootLayout({
   const locale = await getLocale();
   const dict = await getDictionary();
   return (
-    <html lang={locale} className={`${outfit.variable} ${signika.variable}`}>
+    <html
+      lang={HTML_LANG[locale]}
+      className={`${outfit.variable} ${signika.variable}${
+        locale === "ua" ? ` ${manrope.variable} ${rubik.variable}` : ""
+      }`}
+    >
       <body>
         <I18nProvider locale={locale} dict={dict}>
           {children}

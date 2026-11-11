@@ -225,7 +225,7 @@ export function SlicedPortrait({
               <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-[var(--color-orange)] to-[var(--color-coral)] text-xs text-white">
                 ✦
               </span>
-              <span className="text-sm font-bold text-[var(--color-ink)]">AI Heritage Scan</span>
+              <span className="whitespace-nowrap text-sm font-bold text-[var(--color-ink)]">{scanLabel}</span>
             </div>
           </div>
         )}

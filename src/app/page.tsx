@@ -80,7 +80,7 @@ export default async function LandingPage() {
           {[
             ["124K+", dict.landing.statsReports],
             ["94", dict.landing.statsRegions],
-            ["6 sec", dict.landing.statsAvgScan],
+            [dict.landing.statsAvgScanValue, dict.landing.statsAvgScan],
           ].map(([stat, label]) => (
             <div key={label}>
               <div className="font-display text-2xl font-bold text-[var(--color-orange)] tabular">{stat}</div>

@@ -37,6 +37,7 @@ export const pl: Dictionary = {
     statsReports: "raportów",
     statsRegions: "regionów",
     statsAvgScan: "śr. czas skanu",
+    statsAvgScanValue: "6 s",
     howItWorksEyebrow: "Jak to działa",
     howItWorksHeading: "Trzy kroki do Twojej historii",
     step1Title: "Opowiedz nam o sobie",

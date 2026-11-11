@@ -4,11 +4,13 @@ import { DEFAULT_LOCALE, isLocale, type Locale } from "./config";
 import { en, type Dictionary } from "./dictionaries/en";
 import { ro } from "./dictionaries/ro";
 import { pl } from "./dictionaries/pl";
+import { ua } from "./dictionaries/ua";
 
 const DICTIONARIES: Record<Locale, Dictionary> = {
   en,
   ro,
   pl,
+  ua,
 };
 
 /**

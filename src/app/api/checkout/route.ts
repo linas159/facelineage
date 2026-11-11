@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
     expand: ["latest_invoice.payment_intent"],
   };
 
-  // PayPal + Link only support some currencies — not RON. Drop the
+  // PayPal + Link only support some currencies — not RON or UAH. Drop the
   // unsupported methods per currency so Stripe doesn't reject the sub create
   // with "payment method type X does not support currency Y". PayPal covers
   // PLN (Link doesn't), so PLN gets card + paypal. BLIK is PLN-only and
@@ -163,6 +163,7 @@ export async function POST(req: NextRequest) {
     eur: new Set(["card", "paypal", "link"]),
     ron: new Set(["card"]),
     pln: new Set(["card", "paypal", BLIK]),
+    uah: new Set(["card"]),
   };
   const walletsMethods = Array.from(
     PM_CURRENCIES[currency] ?? new Set(["card"]),

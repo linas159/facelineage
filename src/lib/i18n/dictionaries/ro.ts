@@ -36,6 +36,7 @@ export const ro: Dictionary = {
     statsReports: "rapoarte",
     statsRegions: "regiuni",
     statsAvgScan: "scanare medie",
+    statsAvgScanValue: "6 sec",
     howItWorksEyebrow: "Cum funcționează",
     howItWorksHeading: "Trei pași către povestea ta",
     step1Title: "Spune-ne despre tine",

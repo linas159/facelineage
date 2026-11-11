@@ -64,6 +64,17 @@
   --shadow-chip: 0 2px 8px -2px rgba(40, 32, 60, 0.10);
 }
 
+/* Ukrainian (/ua): Cyrillic-capable fonts — variables set in layout.tsx.
+   Outfit/Signika stay in the stack for glyphs Manrope/Rubik lack (→ arrows).
+   Manrope reads lighter than Outfit at the same weight, so medium/semibold
+   step up one notch to keep buttons and labels visually matched. */
+html:lang(uk) {
+  --font-display: "Rubik", "Signika", "Outfit", system-ui, sans-serif;
+  --font-body: "Manrope", "Outfit", system-ui, sans-serif;
+  --font-weight-medium: 600;
+  --font-weight-semibold: 700;
+}
+
 /* ───────────────────────────────────────────────────────────────────────────
    Base
    ─────────────────────────────────────────────────────────────────────── */
