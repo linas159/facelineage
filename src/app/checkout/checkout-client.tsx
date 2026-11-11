@@ -12,9 +12,16 @@ import {
 } from "@stripe/react-stripe-js";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { PLANS, currencySupportsPayPal, type Currency, type PlanKey } from "@/lib/stripe";
+import {
+  PLANS,
+  currencySupportsBlik,
+  currencySupportsPayPal,
+  type Currency,
+  type PlanKey,
+} from "@/lib/stripe";
 import { preloadCheckoutInit } from "@/lib/preload-checkout";
 import { PayPalButton } from "@/components/paypal-button";
+import { BlikButton } from "@/components/blik-button";
 import { useI18n, fmt, localizeHref } from "@/lib/i18n/client";
 import { capture } from "@/lib/posthog/client";
 import { usePayPalVisibility } from "@/lib/posthog/use-paypal-hidden";
@@ -186,6 +193,21 @@ export function CheckoutClient(props: CheckoutClientProps) {
         })
       : null;
 
+  // BLIK: PLN intro checkouts only (the PLN wallets subscription lists
+  // `blik`). Its mandate disclosure needs the first renewal date + amount.
+  const introPlan = props.mode === "intro" && props.plan ? PLANS[props.plan] : null;
+  const blik =
+    introPlan && init?.walletsClientSecret && currencySupportsBlik(init.currency)
+      ? {
+          clientSecret: init.walletsClientSecret,
+          introPrice: formatMoney(init.amount, init.currency, locale),
+          recurringPrice: formatMoney(introPlan.recurring[init.currency as Currency], init.currency, locale),
+          firstRenewalDate: new Intl.DateTimeFormat(INTL_LOCALE[locale] ?? "en-US", {
+            dateStyle: "long",
+          }).format(new Date(Date.now() + introPlan.introDays * 86_400_000)),
+        }
+      : null;
+
   // /api/checkout returns a fully-locale-prefixed returnUrl. The upsell
   // path constructs its own here — apply the same prefix so a /ro user
   // doesn't land back on the English report.
@@ -236,7 +258,9 @@ export function CheckoutClient(props: CheckoutClientProps) {
           ExpressCheckoutElement unless the account has "PayPal Vault for
           Subscriptions" approval (gated, separate from the basic
           recurring approval), so we render PayPal ourselves and call
-          stripe.confirmPayment directly with type="paypal". */}
+          stripe.confirmPayment directly with type="paypal". BLIK (PLN only)
+          isn't an ExpressCheckoutElement method either, so it gets its own
+          code-entry button too. */}
       {init && stripePromise && (init.walletsClientSecret || init.clientSecret) && (
         <Elements
           stripe={stripePromise}
@@ -257,6 +281,16 @@ export function CheckoutClient(props: CheckoutClientProps) {
               <PayPalButton
                 clientSecret={init.walletsClientSecret ?? init.clientSecret!}
                 returnUrl={redirectTarget}
+              />
+            )}
+            {blik && (
+              <BlikButton
+                clientSecret={blik.clientSecret}
+                returnUrl={redirectTarget}
+                introPrice={blik.introPrice}
+                recurringPrice={blik.recurringPrice}
+                firstRenewalDate={blik.firstRenewalDate}
+                customerEmail={init.customerEmail ?? null}
               />
             )}
           </div>

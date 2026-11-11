@@ -99,5 +99,7 @@ function paymentMethodSummary(pm: Stripe.PaymentMethod): SavedPaymentMethod | nu
       label: "Link",
     };
   }
+  // Anything else (incl. BLIK, whose mandate is off-session-only) isn't
+  // one-tap eligible → null routes the customer through /checkout.
   return null;
 }

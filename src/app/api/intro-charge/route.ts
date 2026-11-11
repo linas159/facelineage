@@ -7,6 +7,7 @@ import {
   priceIdFor,
   pickCurrency,
   type PlanKey,
+  isOneTapEligiblePm,
 } from "@/lib/stripe";
 import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { createClient } from "@/lib/supabase/server";
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
   )) as Stripe.Customer;
   const pmRef = customer.invoice_settings?.default_payment_method;
   const savedPmId = typeof pmRef === "string" ? pmRef : pmRef?.id;
-  if (!savedPmId) {
+  if (!savedPmId || !(await isOneTapEligiblePm(savedPmId))) {
     return NextResponse.json({ requiresCheckout: true });
   }
 

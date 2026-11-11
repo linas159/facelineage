@@ -116,6 +116,21 @@ export function currencySupportsPayPal(currency: string | null | undefined): boo
   return !!currency && PAYPAL_CURRENCIES.has(currency.toLowerCase() as Currency);
 }
 
+/** BLIK (recurring, Model O) is PLN-only. Mirrors PM_CURRENCIES in /api/checkout. */
+export function currencySupportsBlik(currency: string | null | undefined): boolean {
+  return currency?.toLowerCase() === "pln";
+}
+
+/**
+ * Saved BLIK mandates only support off-session charges, but our one-tap
+ * flows (/api/intro-charge, /api/upsell-charge) confirm on-session — so a
+ * saved BLIK PM must route the customer through checkout instead.
+ */
+export async function isOneTapEligiblePm(pmId: string): Promise<boolean> {
+  const pm = await stripe.paymentMethods.retrieve(pmId);
+  return pm.type !== "blik";
+}
+
 /**
  * Read the correct amount off a Stripe Price for the requested currency.
  * Falls back to the default `unit_amount` if `currency_options` doesn't

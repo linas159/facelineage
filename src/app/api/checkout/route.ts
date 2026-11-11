@@ -17,8 +17,9 @@ import { metaEventId, readRequestContext, sendMetaEvent } from "@/lib/meta/capi"
  * POST /api/checkout
  *
  * Creates TWO Stripe Subscriptions tied to the same customer:
- *   - subWallets → ExpressCheckoutElement (card + paypal + link allowed,
- *     so PayPal can render as a wallet *and* be saved for recurring).
+ *   - subWallets → ExpressCheckoutElement + custom PayPal/BLIK buttons
+ *     (card + paypal + link, or + blik for PLN, so those methods can be
+ *     saved for recurring).
  *   - subCard    → PaymentElement (card only, no tabs).
  *
  * Each subscription has `trial_period_days` for the intro window and an
@@ -152,12 +153,16 @@ export async function POST(req: NextRequest) {
   // PayPal + Link only support some currencies — not RON. Drop the
   // unsupported methods per currency so Stripe doesn't reject the sub create
   // with "payment method type X does not support currency Y". PayPal covers
-  // PLN (Link doesn't), so PLN gets card + paypal.
+  // PLN (Link doesn't), so PLN gets card + paypal. BLIK is PLN-only and
+  // uses a recurring (Model O) mandate saved with the intro payment, so the
+  // post-trial renewal is charged off-session like any saved card.
+  // stripe-node 17.x's union predates recurring BLIK — hence the cast.
+  const BLIK = "blik" as Stripe.SubscriptionCreateParams.PaymentSettings.PaymentMethodType;
   const PM_CURRENCIES: Record<string, Set<Stripe.SubscriptionCreateParams.PaymentSettings.PaymentMethodType>> = {
     usd: new Set(["card", "paypal", "link"]),
     eur: new Set(["card", "paypal", "link"]),
     ron: new Set(["card"]),
-    pln: new Set(["card", "paypal"]),
+    pln: new Set(["card", "paypal", BLIK]),
   };
   const walletsMethods = Array.from(
     PM_CURRENCIES[currency] ?? new Set(["card"]),

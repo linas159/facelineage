@@ -6,6 +6,7 @@ import {
   pickCurrency,
   priceAmountFor,
   UPSELL_SKU_BY_UI_ID,
+  isOneTapEligiblePm,
 } from "@/lib/stripe";
 import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { createClient } from "@/lib/supabase/server";
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  if (!defaultPm) {
+  if (!defaultPm || !(await isOneTapEligiblePm(defaultPm))) {
     return NextResponse.json({ requiresCheckout: true });
   }
 
