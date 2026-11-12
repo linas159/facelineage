@@ -19,7 +19,9 @@ import { recordDispute } from "@/lib/prevent/disputes";
 import { provisionIntroPayment } from "@/lib/provisioning";
 import { getOrCreateAuthUser } from "@/lib/auth-user";
 import { sendSubscriptionCanceledEmail } from "@/lib/email/send";
-import { formatChargeMoment } from "@/lib/email/templates";
+import { formatChargeMoment, perInterval } from "@/lib/email/templates";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
+import { billingLocale } from "@/lib/email/copy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -534,14 +536,25 @@ async function confirmCancellation(opts: {
     return;
   }
 
+  // The language the customer bought in (stamped at provisioning); older
+  // accounts fall back to the language implied by the billing currency.
+  const { data: profile } = await db
+    .from("profiles")
+    .select("locale")
+    .eq("id", claimed.user_id)
+    .maybeSingle();
+  const locale = billingLocale(profile?.locale, sub.currency);
+
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://facelineage.com";
   const sent = await sendSubscriptionCanceledEmail(email, {
     firstName: customer?.name?.trim().split(/\s+/)[0] || undefined,
     // The moment, not the day — same reason the trial receipt names it: the
     // customer's record of when access ends can't be vague.
-    accessUntil: endsAt && endsAt * 1000 > Date.now() ? formatChargeMoment(endsAt) : undefined,
-    canceledAmount: recurringAmountOf(sub),
-    manageUrl: `${baseUrl}/account`,
+    accessUntil:
+      endsAt && endsAt * 1000 > Date.now() ? formatChargeMoment(endsAt, locale) : undefined,
+    canceledAmount: recurringAmountOf(sub, locale),
+    manageUrl: `${baseUrl}${locale === DEFAULT_LOCALE ? "" : `/${locale}`}/account`,
+    locale,
   });
   if (!sent) {
     // Let a webhook retry (or the later `.deleted` event) have another go.
@@ -552,7 +565,7 @@ async function confirmCancellation(opts: {
 }
 
 /** "$24.99/week" for the subscription's own price + currency, if resolvable. */
-function recurringAmountOf(sub: Stripe.Subscription): string | undefined {
+function recurringAmountOf(sub: Stripe.Subscription, locale: Locale): string | undefined {
   const price = sub.items?.data[0]?.price;
   if (!price) return undefined;
   const currency: Currency = isCurrency(sub.currency) ? sub.currency : "usd";
@@ -563,7 +576,7 @@ function recurringAmountOf(sub: Stripe.Subscription): string | undefined {
   const cents = priceAmountFor(price, currency);
   if (!cents) return undefined;
   const interval = price.recurring?.interval;
-  return `${formatPrice(cents, currency, "en")}${interval ? `/${interval}` : ""}`;
+  return perInterval(formatPrice(cents, currency, locale), interval, locale);
 }
 
 async function customerOf(sub: Stripe.Subscription): Promise<Stripe.Customer | null> {

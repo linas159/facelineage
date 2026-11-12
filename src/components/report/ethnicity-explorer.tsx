@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Region } from "@/lib/report-data";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { ColoredWorldMap } from "./colored-world-map";
 
 function describeArc(cx: number, cy: number, r: number, startA: number, endA: number) {
@@ -16,9 +17,13 @@ function describeArc(cx: number, cy: number, r: number, startA: number, endA: nu
 
 interface Props {
   regions: Region[];
+  labels: Pick<
+    Dictionary["report"],
+    "ethnicityEyebrow" | "ethnicityTitle" | "ethnicityHint" | "mapEyebrow" | "detailEyebrow"
+  >;
 }
 
-export function EthnicityExplorer({ regions }: Props) {
+export function EthnicityExplorer({ regions, labels: t }: Props) {
   const [selectedKey, setSelectedKey] = useState<string>(regions[0]?.key ?? "");
   const total = regions.reduce((s, r) => s + r.pct, 0);
 
@@ -50,13 +55,13 @@ export function EthnicityExplorer({ regions }: Props) {
       {/* Pie chart */}
       <div className="rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)]">
         <p className="text-center text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          Your ethnicity
+          {t.ethnicityEyebrow}
         </p>
         <h3 className="mb-1 text-center font-display text-xl font-bold">
-          Ethnicity diagram
+          {t.ethnicityTitle}
         </h3>
         <p className="mb-4 text-center text-xs text-[var(--color-ink-muted)]">
-          Tap a slice to see the regional breakdown
+          {t.ethnicityHint}
         </p>
 
         <div className="relative mx-auto w-[260px]">
@@ -123,7 +128,7 @@ export function EthnicityExplorer({ regions }: Props) {
       {/* World map — countries belonging to the selected region get tinted */}
       <div className="mt-5 overflow-hidden rounded-[var(--radius-card)] bg-white p-5 shadow-[var(--shadow-card)]">
         <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          Geographic spread
+          {t.mapEyebrow}
         </p>
         <h3 className="mb-3 font-display text-xl font-bold">{selected.name}</h3>
 
@@ -142,7 +147,7 @@ export function EthnicityExplorer({ regions }: Props) {
         <div className="mb-4 flex items-baseline justify-between">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-              Detalisation
+              {t.detailEyebrow}
             </p>
             <h3 className="font-display text-xl font-bold">{selected.name}</h3>
           </div>

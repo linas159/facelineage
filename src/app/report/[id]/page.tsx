@@ -7,7 +7,7 @@ import { ReportActions } from "@/components/report/report-actions";
 import type { UpsellId } from "@/components/upsell-sections";
 import { loadReport } from "@/lib/report-loader";
 import { createClient } from "@/lib/supabase/server";
-import { getLocale, localized } from "@/lib/i18n/server";
+import { dictionaryFor, fmt, getLocale, localized } from "@/lib/i18n/server";
 import type { UpsellSku } from "@/lib/report-loader";
 
 const SKU_TO_UI_ID: Record<UpsellSku, UpsellId> = {
@@ -22,6 +22,13 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   const { id } = await params;
   const locale = await getLocale();
   const report = await loadReport(id);
+
+  // A report is shown in the language it was generated in. Opened under the
+  // wrong prefix (an emailed link, a language switch) → hop to its own one.
+  if (report.locale && report.locale !== locale) {
+    redirect(localized(`/report/${id}`, report.locale));
+  }
+  const t = dictionaryFor(report.locale ?? locale).report;
 
   if (report.status === "missing") {
     // RLS hides the row from signed-out visitors, so "missing" usually means
@@ -65,12 +72,10 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     return (
       <FunnelShell>
         <div className="pt-6 text-center">
-          <Chip color="orange" className="mb-4">Payment received</Chip>
-          <h1 className="mb-3 text-balance">
-            Your report is being composed.
-          </h1>
+          <Chip color="orange" className="mb-4">{t.paymentReceived}</Chip>
+          <h1 className="mb-3 text-balance">{t.composingHeadline}</h1>
           <p className="mx-auto mb-6 max-w-sm text-sm text-[var(--color-ink-soft)]">
-            Sit tight — we&apos;re reading your selfie, mapping your regions, and painting your ancestor portrait. It usually takes about a minute.
+            {t.composingBody}
           </p>
         </div>
         {/* Wrapper coordinates the spinner + upsell popups so the
@@ -101,33 +106,33 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     <FunnelShell>
       {/* ─────────── HERO ─────────── */}
       <div className="pt-6 text-center">
-        <Chip color="green" className="mb-4">Report complete</Chip>
+        <Chip color="green" className="mb-4">{t.complete}</Chip>
         <h1 className="mb-3 text-balance">
-          Your face tells a story <span className="text-[var(--color-orange)]">12,000 years</span> in the making.
+          <Highlighted template={t.heroTitle} value={t.heroYears} />
         </h1>
         <p className="mx-auto mb-6 max-w-sm text-sm text-[var(--color-ink-soft)]">
-          Here&apos;s the heritage written into your features.
+          {t.heroSub}
         </p>
       </div>
 
       {/* ─────────── ETHNICITY CONCLUSION ─────────── */}
       <Card className="mb-5 bg-[var(--color-orange-pale)]">
         <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          Conclusion
+          {t.conclusionEyebrow}
         </p>
-        <CardTitle className="mb-2">Your heritage at a glance</CardTitle>
+        <CardTitle className="mb-2">{t.conclusionTitle}</CardTitle>
         <CardDescription>{conclusion}</CardDescription>
       </Card>
 
       {/* ─────────── PIE CHART + MAP + DETAIL ─────────── */}
-      <EthnicityExplorer regions={regions} />
+      <EthnicityExplorer regions={regions} labels={t} />
 
       {/* ─────────── FACIAL TRAITS ─────────── */}
       <section className="mt-8">
         <p className="mb-1 text-center text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          Facial traits
+          {t.traitsEyebrow}
         </p>
-        <h2 className="mb-4 text-center text-2xl">Six features, six clues</h2>
+        <h2 className="mb-4 text-center text-2xl">{t.traitsTitle}</h2>
         <div className="space-y-4">
           {facialTraits.map((t) => (
             <Card key={t.key} className="!p-5">
@@ -161,16 +166,16 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
       {/* ─────────── ANCESTOR PORTRAIT ─────────── */}
       <section className="mt-8">
         <p className="mb-1 text-center text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          Your ancestor
+          {t.ancestorEyebrow}
         </p>
-        <h2 className="mb-4 text-center text-2xl">A face from your line</h2>
+        <h2 className="mb-4 text-center text-2xl">{t.ancestorTitle}</h2>
         <Card className="overflow-hidden !p-0">
           <div className="relative aspect-[4/5] w-full overflow-hidden bg-[var(--color-bg-warm)]">
             {ancestor.imageSrc && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={ancestor.imageSrc}
-                alt={`Ancestor portrait — ${ancestor.name}`}
+                alt={fmt(t.ancestorAlt, { name: ancestor.name })}
                 className="h-full w-full object-cover"
               />
             )}
@@ -190,9 +195,9 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
       {/* ─────────── CULTURAL INSIGHTS ─────────── */}
       <section className="mt-8">
         <p className="mb-1 text-center text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          Cultural insights
+          {t.cultureEyebrow}
         </p>
-        <h2 className="mb-4 text-center text-2xl">Where your face feels at home</h2>
+        <h2 className="mb-4 text-center text-2xl">{t.cultureTitle}</h2>
         <div className="space-y-4">
           {culturalInsights.map((c) => (
             <Card key={c.key} className={c.imageSrc ? "overflow-hidden !p-0" : ""}>
@@ -213,10 +218,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
 
       {/* ─────────── HERITAGE STORY ─────────── */}
       <Card className="mt-8">
-        <CardTitle className="mb-1">Your heritage story</CardTitle>
-        <CardDescription className="mb-4">
-          A narrative woven from your strongest matches.
-        </CardDescription>
+        <CardTitle className="mb-1">{t.storyTitle}</CardTitle>
+        <CardDescription className="mb-4">{t.storySub}</CardDescription>
         <p className="text-base leading-relaxed text-[var(--color-ink-soft)]">
           <span className="float-left mr-2 font-display text-5xl leading-[0.85] text-[var(--color-orange)]">
             {heritageStory.charAt(0)}
@@ -227,19 +230,29 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
 
       {/* ─────────── UNIQUENESS SCORE ─────────── */}
       <Card className="mt-5 text-center">
-        <CardTitle>Facial uniqueness score</CardTitle>
+        <CardTitle>{t.scoreTitle}</CardTitle>
         <p className="my-4 font-display text-6xl font-bold text-[var(--color-green)] tabular">
           {uniquenessScore}
           <span className="text-2xl">/100</span>
         </p>
-        <CardDescription>
-          Your combination of features is rarer than {uniquenessScore}% of analyses we&apos;ve run.
-        </CardDescription>
+        <CardDescription>{fmt(t.scoreBody, { n: uniquenessScore })}</CardDescription>
       </Card>
 
       {/* ─────────── SHARE / DOWNLOAD ─────────── */}
-      <ReportActions analysisId={id} />
+      <ReportActions analysisId={id} backHref={localized("/dashboard", report.locale ?? locale)} />
 
     </FunnelShell>
+  );
+}
+
+/** Renders a dictionary line with `{years}`-style slot shown in the accent colour. */
+function Highlighted({ template, value }: { template: string; value: string }) {
+  const [before, after = ""] = template.split(/\{\w+\}/);
+  return (
+    <>
+      {before}
+      <span className="text-[var(--color-orange)]">{value}</span>
+      {after}
+    </>
   );
 }

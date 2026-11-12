@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import { after } from "next/server";
 import { cache } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { loadReport, type ReportData } from "@/lib/report-loader";
-import { appOrigin, bumpShareView, resolveShareToken } from "@/lib/share";
+import { appOrigin, bumpShareView, resolveShareToken, shareUrl } from "@/lib/share";
+import { DEFAULT_LOCALE } from "@/lib/i18n/config";
+import { dictionaryFor, fmt, getLocale, localized } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -39,14 +41,14 @@ export async function generateMetadata({
   const report = await load(token);
   if (!report) return { title: "Facelineage" };
 
+  const locale = report.locale ?? DEFAULT_LOCALE;
+  const t = dictionaryFor(locale).share;
   const top = report.regions[0];
   const title = top
-    ? `${top.name} — ${top.pct.toFixed(1)}% | A Facelineage heritage report`
-    : "A Facelineage heritage report";
-  const description =
-    report.conclusion.slice(0, 200) ||
-    "A face read for the heritage written into its features.";
-  const url = `${appOrigin()}/s/${token}`;
+    ? fmt(t.metaTitleTop, { region: top.name, pct: top.pct.toFixed(1) })
+    : t.metaTitle;
+  const description = report.conclusion.slice(0, 200) || t.metaDescription;
+  const url = shareUrl(token, locale);
 
   return {
     title,
@@ -77,6 +79,12 @@ export default async function SharedReportPage({
   const report = await load(token);
   if (!report) notFound();
 
+  // Render in the report's language, like the report page itself.
+  const locale = report.locale ?? DEFAULT_LOCALE;
+  if (locale !== (await getLocale())) redirect(localized(`/s/${token}`, locale));
+  const t = dictionaryFor(locale).share;
+  const r = dictionaryFor(locale).report;
+
   // Counting the visit must never delay (or fail) the render.
   after(() => bumpShareView(token));
 
@@ -87,40 +95,41 @@ export default async function SharedReportPage({
     <main className="min-h-[100dvh] bg-[var(--color-bg-base)]">
       <header className="bg-[var(--color-bg-base)]/95 backdrop-blur">
         <div className="mx-auto flex max-w-md items-center justify-between px-5 py-4">
-          <Link href="/">
+          <Link href={localized("/", locale)}>
             <Logo className="h-10" />
           </Link>
-          <Link href="/quiz/1">
-            <Button size="sm">Try it on my face</Button>
+          <Link href={localized("/quiz/1", locale)}>
+            <Button size="sm">{t.tryCta}</Button>
           </Link>
         </div>
       </header>
 
       <div className="mx-auto w-full max-w-md px-5 pb-16">
         <div className="pt-4 text-center">
-          <Chip color="violet" className="mb-4">Shared with you</Chip>
+          <Chip color="violet" className="mb-4">{t.chip}</Chip>
           <h1 className="mb-3 text-balance">
-            A face traced back{" "}
-            <span className="text-[var(--color-orange)]">12,000 years</span>.
+            {t.heroTitle.split("{years}")[0]}
+            <span className="text-[var(--color-orange)]">{t.heroYears}</span>
+            {t.heroTitle.split("{years}")[1]}
           </h1>
           <p className="mx-auto mb-6 max-w-sm text-sm text-[var(--color-ink-soft)]">
-            Someone shared their Facelineage report with you. Here&apos;s the short version.
+            {t.intro}
           </p>
         </div>
 
         {conclusion && (
           <Card className="mb-5 bg-[var(--color-orange-pale)]">
             <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-              Conclusion
+              {t.conclusionEyebrow}
             </p>
-            <CardTitle className="mb-2">Heritage at a glance</CardTitle>
+            <CardTitle className="mb-2">{t.conclusionTitle}</CardTitle>
             <CardDescription>{conclusion}</CardDescription>
           </Card>
         )}
 
         {regions.length > 0 && (
           <Card className="mb-5">
-            <CardTitle className="mb-4">Ethnicity breakdown</CardTitle>
+            <CardTitle className="mb-4">{t.breakdownTitle}</CardTitle>
             <div className="space-y-3">
               {regions.map((r) => (
                 <div key={r.key}>
@@ -151,7 +160,7 @@ export default async function SharedReportPage({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={ancestor.imageSrc}
-                alt={`Ancestor portrait — ${ancestor.name}`}
+                alt={fmt(r.ancestorAlt, { name: ancestor.name })}
                 className="h-full w-full object-cover"
               />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/65 via-black/30 to-transparent p-5 text-white">
@@ -167,7 +176,7 @@ export default async function SharedReportPage({
         {culturalInsights[0] && (
           <Card className="mb-5">
             <p className="mb-1 text-[11px] font-bold uppercase tracking-wider text-[var(--color-orange)]">
-              Cultural insight
+              {t.insightEyebrow}
             </p>
             <CardTitle className="mb-2">{culturalInsights[0].name}</CardTitle>
             <CardDescription>{culturalInsights[0].description}</CardDescription>
@@ -175,29 +184,24 @@ export default async function SharedReportPage({
         )}
 
         <Card className="mb-8 text-center">
-          <CardTitle>Facial uniqueness score</CardTitle>
+          <CardTitle>{t.scoreTitle}</CardTitle>
           <p className="my-4 font-display text-6xl font-bold text-[var(--color-green)] tabular">
             {uniquenessScore}
             <span className="text-2xl">/100</span>
           </p>
-          <CardDescription>
-            Rarer than {uniquenessScore}% of the analyses we&apos;ve run.
-          </CardDescription>
+          <CardDescription>{fmt(t.scoreBody, { n: uniquenessScore })}</CardDescription>
         </Card>
 
         <Card className="bg-[var(--color-orange-pale)] text-center">
-          <CardTitle className="mb-2">What does your face say?</CardTitle>
-          <CardDescription className="mb-5">
-            Six facial traits, your full regional map, an ancestor portrait and your heritage
-            story — from one selfie.
-          </CardDescription>
-          <Link href="/quiz/1">
-            <Button size="block">Analyze my face</Button>
+          <CardTitle className="mb-2">{t.ctaTitle}</CardTitle>
+          <CardDescription className="mb-5">{t.ctaBody}</CardDescription>
+          <Link href={localized("/quiz/1", locale)}>
+            <Button size="block">{t.ctaButton}</Button>
           </Link>
         </Card>
 
         <p className="mt-6 text-center text-[11px] text-[var(--color-ink-muted)]">
-          Facelineage is an entertainment product. Results are AI estimates, not a DNA test.
+          {t.disclaimer}
         </p>
       </div>
     </main>

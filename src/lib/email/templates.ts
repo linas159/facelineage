@@ -2,7 +2,18 @@
  * HTML email templates. Plain strings with inline styles — email clients
  * (especially Outlook, Apple Mail, Gmail mobile) ignore most CSS, so we
  * stick to tables and inline `style="..."` everywhere.
+ *
+ * Copy lives in `./copy/{locale}.ts`; every template takes a `locale`
+ * (default "en") and renders entirely in that language.
  */
+
+import { DEFAULT_LOCALE, HTML_LANG, INTL_LOCALE, type Locale } from "@/lib/i18n/config";
+import { emailCopy, type EmailCopy } from "./copy";
+
+export { formatChargeMoment, formatChargeDate, perInterval } from "./copy";
+
+const SITE = "https://facelineage.com";
+const SUPPORT = "support@facelineage.com";
 
 const BRAND = {
   violet: "#7c5cff",
@@ -25,6 +36,7 @@ export interface ReportReadyEmailVars {
   cardLast4?: string;     // "4242"
   trialEnds: string;      // "May 17, 2026 at 6:07 PM UTC"
   recurringAmount: string; // "$24.99/week"
+  locale?: Locale;
 }
 
 export function renderReportReadyEmail(v: ReportReadyEmailVars): {
@@ -32,20 +44,25 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
   html: string;
   text: string;
 } {
-  const hello = v.firstName ? `Hi ${escape(v.firstName)},` : "Hello,";
+  const locale = v.locale ?? DEFAULT_LOCALE;
+  const c = emailCopy(locale);
+  const r = c.reportReady;
+  const hello = greeting(c, v.firstName);
+  const accountUrl = siteUrl("/account", locale);
+  const strong = (s: string) => `<strong style="color:${BRAND.inkSoft};">${escape(s)}</strong>`;
 
-  const subject = "Your Facelineage report is ready ✨";
+  const subject = r.subject;
 
   const html = `<!DOCTYPE html>
-<html lang="en">
+<html lang="${HTML_LANG[locale]}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${subject}</title>
+<title>${escape(subject)}</title>
 </head>
 <body style="margin:0;padding:0;background:${BRAND.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.ink};">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-    Your AI heritage report is ready to view. Tap below to see your full ancestry breakdown.
+    ${escape(r.preheader)}
   </div>
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.bg};padding:32px 16px;">
@@ -61,10 +78,10 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
                   <td align="center">
                     <div style="font-size:13px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.85);">Facelineage</div>
                     <div style="margin-top:18px;font-size:30px;font-weight:800;line-height:1.15;color:#ffffff;letter-spacing:-0.01em;">
-                      Your report is ready
+                      ${escape(r.headline)}
                     </div>
                     <div style="margin-top:12px;font-size:15px;line-height:1.45;color:rgba(255,255,255,0.92);max-width:420px;margin-left:auto;margin-right:auto;">
-                      We've finished composing your heritage breakdown, ancestor portrait, and story.
+                      ${escape(r.subhead)}
                     </div>
                   </td>
                 </tr>
@@ -78,7 +95,7 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
 
               <p style="margin:0 0 12px 0;font-size:16px;color:${BRAND.ink};font-weight:600;">${hello}</p>
               <p style="margin:0 0 24px 0;font-size:15px;line-height:1.6;color:${BRAND.inkSoft};">
-                Your personalized Facelineage report is ready. We mapped your features to ancestral regions and rendered a portrait of one of your possible ancestors.
+                ${escape(r.lead)}
               </p>
 
               <!-- CTA -->
@@ -86,7 +103,7 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
                 <tr>
                   <td align="center" style="padding:8px 0 28px 0;">
                     <a href="${escape(v.reportUrl)}" style="display:inline-block;padding:16px 32px;background:${BRAND.violet};color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;border-radius:14px;box-shadow:0 4px 16px rgba(124,92,255,0.35);">
-                      View my report →
+                      ${escape(r.cta)}
                     </a>
                   </td>
                 </tr>
@@ -94,30 +111,30 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
 
               <!-- What's inside -->
               <div style="margin:8px 0 24px 0;padding:20px;background:${BRAND.pale};border-radius:16px;">
-                <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${BRAND.violetDeep};margin-bottom:12px;">Inside your report</div>
+                <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${BRAND.violetDeep};margin-bottom:12px;">${escape(r.insideTitle)}</div>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                  ${row("🌍", "Heritage breakdown", "Percentage match across 94 ancestral regions.")}
-                  ${row("🗺️", "Migration map", "The routes your ancestors likely traveled.")}
-                  ${row("✨", "Ancestor portrait", "A painted impression from eight generations back.")}
-                  ${row("📖", "Heritage story", "A narrative tying your features to history.")}
+                  ${row("🌍", r.item1Title, r.item1Body)}
+                  ${row("🗺️", r.item2Title, r.item2Body)}
+                  ${row("✨", r.item3Title, r.item3Body)}
+                  ${row("📖", r.item4Title, r.item4Body)}
                 </table>
               </div>
 
               <!-- Receipt -->
               <div style="margin:0 0 4px 0;padding:18px 20px;border:1px solid ${BRAND.border};border-radius:14px;">
-                <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${BRAND.inkMuted};margin-bottom:10px;">Receipt</div>
+                <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${BRAND.inkMuted};margin-bottom:10px;">${escape(r.receiptTitle)}</div>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;color:${BRAND.inkSoft};">
                   <tr>
-                    <td style="padding:4px 0;">Charged today</td>
+                    <td style="padding:4px 0;">${escape(r.chargedToday)}</td>
                     <td align="right" style="padding:4px 0;font-weight:700;color:${BRAND.ink};">${escape(v.amountPaid)}</td>
                   </tr>
                   <tr>
-                    <td style="padding:4px 0;">Date</td>
+                    <td style="padding:4px 0;">${escape(r.date)}</td>
                     <td align="right" style="padding:4px 0;color:${BRAND.ink};">${escape(v.paymentDate)}</td>
                   </tr>
                   ${
                     v.cardLast4
-                      ? `<tr><td style="padding:4px 0;">Card</td><td align="right" style="padding:4px 0;color:${BRAND.ink};">●●●● ${escape(v.cardLast4)}</td></tr>`
+                      ? `<tr><td style="padding:4px 0;">${escape(r.card)}</td><td align="right" style="padding:4px 0;color:${BRAND.ink};">●●●● ${escape(v.cardLast4)}</td></tr>`
                       : ""
                   }
                 </table>
@@ -125,7 +142,11 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
 
               <!-- Subscription notice -->
               <p style="margin:18px 0 0 0;font-size:12px;line-height:1.6;color:${BRAND.inkMuted};">
-                Your trial covers full access until <strong style="color:${BRAND.inkSoft};">${escape(v.trialEnds)}</strong>. If you don't cancel before then, your subscription renews at <strong style="color:${BRAND.inkSoft};">${escape(v.recurringAmount)}</strong>. You can cancel anytime from your <a href="https://facelineage.com/account" style="color:${BRAND.violet};text-decoration:none;font-weight:600;">account page</a>.
+                ${fill(r.trialNotice, {
+                  trialEnds: strong(v.trialEnds),
+                  recurring: strong(v.recurringAmount),
+                  account: `<a href="${escape(accountUrl)}" style="color:${BRAND.violet};text-decoration:none;font-weight:600;">${escape(r.accountLink)}</a>`,
+                })}
               </p>
             </td>
           </tr>
@@ -133,12 +154,12 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
           <!-- Footer -->
           <tr>
             <td style="padding:24px 16px 0 16px;text-align:center;font-size:12px;color:${BRAND.inkMuted};line-height:1.6;">
-              Questions? Reply to this email or write to <a href="mailto:support@facelineage.com" style="color:${BRAND.violet};text-decoration:none;font-weight:600;">support@facelineage.com</a>.<br />
+              ${fill(c.footerQuestions, { email: mailto(SUPPORT, 600) })}<br />
               <span style="display:inline-block;margin-top:10px;">
-                <a href="https://facelineage.com/privacy" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Privacy</a>
-                <a href="https://facelineage.com/terms" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Terms</a>
-                <a href="https://facelineage.com/refunds" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Refunds</a>
-                <a href="https://facelineage.com/contact" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Contact</a>
+                ${footerLink(siteUrl("/privacy", locale), c.footerPrivacy)}
+                ${footerLink(siteUrl("/terms", locale), c.footerTerms)}
+                ${footerLink(siteUrl("/refunds", locale), c.footerRefunds)}
+                ${footerLink(siteUrl("/contact", locale), c.footerContact)}
               </span>
               <div style="margin-top:14px;">© ${new Date().getFullYear()} Facelineage</div>
             </td>
@@ -152,20 +173,20 @@ export function renderReportReadyEmail(v: ReportReadyEmailVars): {
 </html>`;
 
   const text = [
-    `${hello.replace(",", "")}`,
+    greetingText(c, v.firstName),
     "",
-    "Your Facelineage report is ready.",
+    r.textReady,
     "",
-    `View your report: ${v.reportUrl}`,
+    fill(r.textView, { url: v.reportUrl }, false),
     "",
-    `Charged today: ${v.amountPaid} on ${v.paymentDate}` +
-      (v.cardLast4 ? ` (card ending ${v.cardLast4})` : ""),
-    `Trial ends: ${v.trialEnds} — renews at ${v.recurringAmount} unless you cancel.`,
-    "Cancel anytime: https://facelineage.com/account",
+    fill(r.textCharged, { amount: v.amountPaid, date: v.paymentDate }, false) +
+      (v.cardLast4 ? fill(r.textCard, { last4: v.cardLast4 }, false) : ""),
+    fill(r.textTrial, { trialEnds: v.trialEnds, recurring: v.recurringAmount }, false),
+    fill(r.textCancel, { url: accountUrl }, false),
     "",
-    "Questions? support@facelineage.com",
+    fill(r.textQuestions, { email: SUPPORT }, false),
     "",
-    "— Facelineage",
+    c.signature,
   ].join("\n");
 
   return { subject, html, text };
@@ -198,6 +219,7 @@ export interface UpcomingChargeEmailVars {
   daysUntilCharge: number;
   cardLast4?: string;     // "4242"
   manageUrl: string;      // https://facelineage.com/account
+  locale?: Locale;
 }
 
 export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
@@ -205,45 +227,52 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
   html: string;
   text: string;
 } {
-  const hello = v.firstName ? `Hi ${escape(v.firstName)},` : "Hello,";
-  const everyInterval = v.interval ? `every ${escape(v.interval)}` : "on a recurring basis";
+  const locale = v.locale ?? DEFAULT_LOCALE;
+  const c = emailCopy(locale);
+  const u = c.upcomingCharge;
+  const hello = greeting(c, v.firstName);
+  const intervalKey = (v.interval ?? "other") as keyof typeof u.every;
+  const every = u.every[intervalKey] ?? u.every.other;
+  const another = u.another[intervalKey] ?? u.another.other;
 
   // "in 3 days" / "tomorrow" / "later today" — read off the clock, not
   // assumed. The last branch should only ever fire as a catch-up after a
   // missed cron run, but if it does the customer gets the truth.
   const when =
-    v.daysUntilCharge >= 2
-      ? `in ${v.daysUntilCharge} days`
-      : v.daysUntilCharge === 1
-        ? "tomorrow"
-        : "later today";
-  const When = when.charAt(0).toUpperCase() + when.slice(1);
+    v.daysUntilCharge >= 1
+      ? new Intl.RelativeTimeFormat(INTL_LOCALE[locale], { numeric: "auto" }).format(v.daysUntilCharge, "day")
+      : u.laterToday;
+  const When = when.charAt(0).toLocaleUpperCase(INTL_LOCALE[locale]) + when.slice(1);
   const moment = escape(v.chargeMoment);
+  const strongMoment = `<strong style="color:${BRAND.ink};">${moment}</strong>`;
+  const amountPer = perIntervalOf(c, v.chargeAmount, v.interval);
 
-  const subject = v.isFirstCharge
-    ? `Your Facelineage trial ends ${when} — ${v.chargeAmount} on ${v.chargeDate}`
-    : `Reminder: your Facelineage subscription renews ${when} — ${v.chargeAmount}`;
+  const subject = fill(
+    v.isFirstCharge ? u.subjectFirst : u.subjectRenewal,
+    { when, amount: v.chargeAmount, date: v.chargeDate },
+    false,
+  );
 
-  const headline = v.isFirstCharge ? `Your trial ends ${when}` : `Your subscription renews ${when}`;
+  const headline = fill(v.isFirstCharge ? u.headlineFirst : u.headlineRenewal, { when });
 
   const lead = v.isFirstCharge
-    ? `Your free trial of Facelineage ends on <strong style="color:${BRAND.ink};">${moment}</strong>. ${When} we&rsquo;ll start your subscription and charge the payment method on file. After that you&rsquo;ll be billed ${everyInterval} until you cancel.`
-    : `This is a friendly reminder that your Facelineage subscription renews on <strong style="color:${BRAND.ink};">${moment}</strong>. ${When} we&rsquo;ll charge the payment method on file for another ${v.interval ? escape(v.interval) : "period"}.`;
+    ? fill(u.leadFirst, { moment: strongMoment, When, every })
+    : fill(u.leadRenewal, { moment: strongMoment, When, period: another });
 
   const cardLine = v.cardLast4
-    ? `<tr><td style="padding:4px 0;">Payment method</td><td align="right" style="padding:4px 0;color:${BRAND.ink};">Card ending ●●●● ${escape(v.cardLast4)}</td></tr>`
+    ? `<tr><td style="padding:4px 0;">${escape(u.paymentMethod)}</td><td align="right" style="padding:4px 0;color:${BRAND.ink};">${fill(u.cardEnding, { last4: v.cardLast4 })}</td></tr>`
     : "";
 
   const html = `<!DOCTYPE html>
-<html lang="en">
+<html lang="${HTML_LANG[locale]}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${subject}</title>
+<title>${escape(subject)}</title>
 </head>
 <body style="margin:0;padding:0;background:${BRAND.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.ink};">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-    You&rsquo;ll be charged ${escape(v.chargeAmount)} ${when}, on ${moment}. Cancel or request a refund anytime from your dashboard.
+    ${fill(u.preheader, { amount: v.chargeAmount, when, moment: v.chargeMoment })}
   </div>
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.bg};padding:32px 16px;">
@@ -262,7 +291,7 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
                       ${headline}
                     </div>
                     <div style="margin-top:12px;font-size:15px;line-height:1.45;color:rgba(255,255,255,0.92);">
-                      You&rsquo;ll be charged <strong style="color:#ffffff;">${escape(v.chargeAmount)}</strong> ${when}, on ${moment}.
+                      ${fill(u.subhead, { amount: `<strong style="color:#ffffff;">${escape(v.chargeAmount)}</strong>`, when, moment })}
                     </div>
                   </td>
                 </tr>
@@ -281,15 +310,15 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
 
               <!-- Charge summary -->
               <div style="margin:0 0 24px 0;padding:20px;background:${BRAND.pale};border-radius:16px;">
-                <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${BRAND.violetDeep};margin-bottom:12px;">Upcoming charge</div>
+                <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${BRAND.violetDeep};margin-bottom:12px;">${escape(u.summaryTitle)}</div>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;color:${BRAND.inkSoft};">
                   <tr>
-                    <td style="padding:4px 0;">Amount</td>
-                    <td align="right" style="padding:4px 0;font-weight:700;color:${BRAND.ink};">${escape(v.chargeAmount)}${v.interval ? ` / ${escape(v.interval)}` : ""}</td>
+                    <td style="padding:4px 0;">${escape(u.amount)}</td>
+                    <td align="right" style="padding:4px 0;font-weight:700;color:${BRAND.ink};">${escape(amountPer)}</td>
                   </tr>
                   <tr>
-                    <td style="padding:4px 0;">Charge date</td>
-                    <td align="right" style="padding:4px 0;color:${BRAND.ink};">${moment} (${when})</td>
+                    <td style="padding:4px 0;">${escape(u.chargeDate)}</td>
+                    <td align="right" style="padding:4px 0;color:${BRAND.ink};">${moment} (${escape(when)})</td>
                   </tr>
                   ${cardLine}
                 </table>
@@ -297,26 +326,30 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
 
               <!-- Cancel / refund — the important, clearly visible block -->
               <div style="margin:0 0 24px 0;padding:22px 22px 8px 22px;border:2px solid ${BRAND.violet};border-radius:16px;background:#ffffff;">
-                <div style="font-size:16px;font-weight:800;color:${BRAND.ink};margin-bottom:6px;">You&rsquo;re in control</div>
+                <div style="font-size:16px;font-weight:800;color:${BRAND.ink};margin-bottom:6px;">${escape(u.controlTitle)}</div>
                 <p style="margin:0 0 16px 0;font-size:14px;line-height:1.6;color:${BRAND.inkSoft};">
-                  Don&rsquo;t want to be charged? You can <strong style="color:${BRAND.ink};">cancel</strong> or <strong style="color:${BRAND.ink};">request a refund</strong> yourself, right now, from your Facelineage dashboard — no need to wait and no questions asked. Cancel any time before <strong style="color:${BRAND.ink};">${moment}</strong> and you won&rsquo;t be charged.
+                  ${fill(u.controlBody, {
+                    cancel: `<strong style="color:${BRAND.ink};">${escape(u.controlCancel)}</strong>`,
+                    refund: `<strong style="color:${BRAND.ink};">${escape(u.controlRefund)}</strong>`,
+                    moment: strongMoment,
+                  })}
                 </p>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                   <tr>
                     <td align="center" style="padding:0 0 16px 0;">
                       <a href="${escape(v.manageUrl)}" style="display:inline-block;padding:15px 30px;background:${BRAND.violet};color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;border-radius:14px;box-shadow:0 4px 16px rgba(124,92,255,0.32);">
-                        Manage, cancel or refund →
+                        ${escape(u.controlCta)}
                       </a>
                     </td>
                   </tr>
                 </table>
                 <p style="margin:0 0 14px 0;font-size:13px;line-height:1.6;color:${BRAND.inkMuted};text-align:center;">
-                  Prefer a hand? Email <a href="mailto:support@facelineage.com" style="color:${BRAND.violet};text-decoration:none;font-weight:700;">support@facelineage.com</a> and we&rsquo;ll sort it out for you.
+                  ${fill(u.controlHelp, { email: mailto(SUPPORT, 700) })}
                 </p>
               </div>
 
               <p style="margin:0;font-size:13px;line-height:1.6;color:${BRAND.inkSoft};">
-                Happy to keep exploring your heritage? No action needed — your subscription continues automatically and you&rsquo;ll keep full access.
+                ${escape(u.keepGoing)}
               </p>
             </td>
           </tr>
@@ -324,12 +357,12 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
           <!-- Footer -->
           <tr>
             <td style="padding:24px 16px 0 16px;text-align:center;font-size:12px;color:${BRAND.inkMuted};line-height:1.6;">
-              Questions? Reply to this email or write to <a href="mailto:support@facelineage.com" style="color:${BRAND.violet};text-decoration:none;font-weight:600;">support@facelineage.com</a>.<br />
+              ${fill(c.footerQuestions, { email: mailto(SUPPORT, 600) })}<br />
               <span style="display:inline-block;margin-top:10px;">
-                <a href="${escape(v.manageUrl)}" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Manage subscription</a>
-                <a href="https://facelineage.com/refunds" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Refund policy</a>
-                <a href="https://facelineage.com/terms" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Terms</a>
-                <a href="https://facelineage.com/privacy" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Privacy</a>
+                ${footerLink(v.manageUrl, c.footerManage)}
+                ${footerLink(siteUrl("/refunds", locale), c.footerRefundPolicy)}
+                ${footerLink(siteUrl("/terms", locale), c.footerTerms)}
+                ${footerLink(siteUrl("/privacy", locale), c.footerPrivacy)}
               </span>
               <div style="margin-top:14px;">© ${new Date().getFullYear()} Facelineage</div>
             </td>
@@ -343,44 +376,23 @@ export function renderUpcomingChargeEmail(v: UpcomingChargeEmailVars): {
 </html>`;
 
   const text = [
-    hello.replace(",", ""),
+    greetingText(c, v.firstName),
     "",
-    v.isFirstCharge
-      ? `Your free Facelineage trial ends on ${v.chargeMoment}.`
-      : `Your Facelineage subscription renews on ${v.chargeMoment}.`,
-    `${When} you'll be charged ${v.chargeAmount}${v.interval ? `/${v.interval}` : ""}` +
-      (v.cardLast4 ? ` to your card ending ${v.cardLast4}.` : "."),
+    fill(v.isFirstCharge ? u.textEndsFirst : u.textEndsRenewal, { moment: v.chargeMoment }, false),
+    fill(u.textCharge, { When, amount: amountPer }, false) +
+      (v.cardLast4 ? fill(u.textCard, { last4: v.cardLast4 }, false) : "."),
     "",
-    "YOU'RE IN CONTROL",
-    `You can cancel or request a refund yourself, anytime, from your Facelineage dashboard: ${v.manageUrl}`,
-    `Cancel any time before ${v.chargeMoment} and you won't be charged.`,
-    "Prefer help? Email support@facelineage.com and we'll sort it out.",
+    u.textControlTitle,
+    fill(u.textControl1, { url: v.manageUrl }, false),
+    fill(u.textControl2, { moment: v.chargeMoment }, false),
+    fill(u.textHelp, { email: SUPPORT }, false),
     "",
-    "Happy to continue? No action needed — your subscription renews automatically.",
+    u.textKeepGoing,
     "",
-    "— Facelineage",
+    c.signature,
   ].join("\n");
 
   return { subject, html, text };
-}
-
-/**
- * The exact instant money moves, in UTC — "August 18, 2026 at 6:07 PM UTC".
- *
- * Billing copy must name the moment, not the day. A bare date leaves the
- * customer guessing which hour their cancellation window closes, and leaves us
- * with nothing precise to point at when the charge is disputed.
- */
-export function formatChargeMoment(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toLocaleString("en-US", {
-    timeZone: "UTC",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  });
 }
 
 /** Whole calendar days (UTC) between two unix timestamps. 1 = tomorrow. */
@@ -412,6 +424,7 @@ export interface SubscriptionCanceledEmailVars {
   /** The charge that will no longer happen: "$24.99/week". Optional. */
   canceledAmount?: string;
   manageUrl: string;      // https://facelineage.com/account
+  locale?: Locale;
 }
 
 export function renderSubscriptionCanceledEmail(v: SubscriptionCanceledEmailVars): {
@@ -419,37 +432,39 @@ export function renderSubscriptionCanceledEmail(v: SubscriptionCanceledEmailVars
   html: string;
   text: string;
 } {
-  const hello = v.firstName ? `Hi ${escape(v.firstName)},` : "Hello,";
+  const locale = v.locale ?? DEFAULT_LOCALE;
+  const c = emailCopy(locale);
+  const k = c.canceled;
+  const hello = greeting(c, v.firstName);
   const until = v.accessUntil ? escape(v.accessUntil) : null;
+  const amountParen = v.canceledAmount ? ` (${escape(v.canceledAmount)})` : "";
 
-  const subject = "Your Facelineage subscription is canceled";
+  const subject = k.subject;
 
-  const headline = "Your subscription is canceled";
-  const subhead = until
-    ? `You won&rsquo;t be charged again. You keep full access until ${until}.`
-    : "You won&rsquo;t be charged again, and your access has ended.";
+  const headline = escape(k.headline);
+  const subhead = until ? fill(k.subheadUntil, { until }) : escape(k.subheadNow);
 
   const lead = until
-    ? `We&rsquo;ve canceled your Facelineage subscription${v.canceledAmount ? ` (${escape(v.canceledAmount)})` : ""}. No further payments will be taken. Your access stays open until <strong style="color:${BRAND.ink};">${until}</strong> — after that the subscription simply ends, with nothing left to cancel.`
-    : `We&rsquo;ve canceled your Facelineage subscription${v.canceledAmount ? ` (${escape(v.canceledAmount)})` : ""}, effective immediately. No further payments will be taken.`;
+    ? fill(k.leadUntil, { amount: amountParen, until: `<strong style="color:${BRAND.ink};">${until}</strong>` })
+    : fill(k.leadNow, { amount: amountParen });
 
   const amountRow = v.canceledAmount
     ? `<tr>
-                    <td style="padding:4px 0;">Recurring charge</td>
+                    <td style="padding:4px 0;">${escape(k.recurringCharge)}</td>
                     <td align="right" style="padding:4px 0;color:${BRAND.ink};text-decoration:line-through;">${escape(v.canceledAmount)}</td>
                   </tr>`
     : "";
 
   const html = `<!DOCTYPE html>
-<html lang="en">
+<html lang="${HTML_LANG[locale]}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${subject}</title>
+<title>${escape(subject)}</title>
 </head>
 <body style="margin:0;padding:0;background:${BRAND.bg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:${BRAND.ink};">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
-    Your cancellation is confirmed. You won&rsquo;t be charged again${until ? `, and you keep access until ${until}` : ""}.
+    ${until ? fill(k.preheaderUntil, { until }) : escape(k.preheaderNow)}
   </div>
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${BRAND.bg};padding:32px 16px;">
@@ -487,28 +502,26 @@ export function renderSubscriptionCanceledEmail(v: SubscriptionCanceledEmailVars
 
               <!-- Cancellation summary -->
               <div style="margin:0 0 24px 0;padding:20px;background:${BRAND.pale};border-radius:16px;">
-                <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${BRAND.violetDeep};margin-bottom:12px;">Cancellation summary</div>
+                <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${BRAND.violetDeep};margin-bottom:12px;">${escape(k.summaryTitle)}</div>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-size:14px;color:${BRAND.inkSoft};">
                   <tr>
-                    <td style="padding:4px 0;">Status</td>
-                    <td align="right" style="padding:4px 0;font-weight:700;color:${BRAND.ink};">Canceled</td>
+                    <td style="padding:4px 0;">${escape(k.status)}</td>
+                    <td align="right" style="padding:4px 0;font-weight:700;color:${BRAND.ink};">${escape(k.statusValue)}</td>
                   </tr>
                   <tr>
-                    <td style="padding:4px 0;">Access ${until ? "until" : "ended"}</td>
-                    <td align="right" style="padding:4px 0;color:${BRAND.ink};">${until ?? "Now"}</td>
+                    <td style="padding:4px 0;">${escape(until ? k.accessUntil : k.accessEnded)}</td>
+                    <td align="right" style="padding:4px 0;color:${BRAND.ink};">${until ?? escape(k.now)}</td>
                   </tr>
                   ${amountRow}
                   <tr>
-                    <td style="padding:4px 0;">Future charges</td>
-                    <td align="right" style="padding:4px 0;font-weight:700;color:${BRAND.ink};">None</td>
+                    <td style="padding:4px 0;">${escape(k.futureCharges)}</td>
+                    <td align="right" style="padding:4px 0;font-weight:700;color:${BRAND.ink};">${escape(k.none)}</td>
                   </tr>
                 </table>
               </div>
 
               <p style="margin:0 0 22px 0;font-size:14px;line-height:1.6;color:${BRAND.inkSoft};">
-                Nothing else is needed from you. If you see a Facelineage charge after this email, reply to it or write to
-                <a href="mailto:support@facelineage.com" style="color:${BRAND.violet};text-decoration:none;font-weight:700;">support@facelineage.com</a>
-                and we&rsquo;ll refund it.
+                ${fill(k.refundPromise, { email: mailto(SUPPORT, 700) })}
               </p>
 
               <!-- Come back whenever -->
@@ -516,13 +529,13 @@ export function renderSubscriptionCanceledEmail(v: SubscriptionCanceledEmailVars
                 <tr>
                   <td align="center" style="padding:0 0 8px 0;">
                     <a href="${escape(v.manageUrl)}" style="display:inline-block;padding:15px 30px;background:${BRAND.violet};color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;border-radius:14px;box-shadow:0 4px 16px rgba(124,92,255,0.32);">
-                      View my account →
+                      ${escape(k.cta)}
                     </a>
                   </td>
                 </tr>
               </table>
               <p style="margin:10px 0 0 0;font-size:13px;line-height:1.6;color:${BRAND.inkMuted};text-align:center;">
-                Changed your mind? You can start again any time from your account — your reports stay where you left them.
+                ${escape(k.comeBack)}
               </p>
             </td>
           </tr>
@@ -530,12 +543,12 @@ export function renderSubscriptionCanceledEmail(v: SubscriptionCanceledEmailVars
           <!-- Footer -->
           <tr>
             <td style="padding:24px 16px 0 16px;text-align:center;font-size:12px;color:${BRAND.inkMuted};line-height:1.6;">
-              Questions? Reply to this email or write to <a href="mailto:support@facelineage.com" style="color:${BRAND.violet};text-decoration:none;font-weight:600;">support@facelineage.com</a>.<br />
+              ${fill(c.footerQuestions, { email: mailto(SUPPORT, 600) })}<br />
               <span style="display:inline-block;margin-top:10px;">
-                <a href="${escape(v.manageUrl)}" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Account</a>
-                <a href="https://facelineage.com/refunds" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Refund policy</a>
-                <a href="https://facelineage.com/terms" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Terms</a>
-                <a href="https://facelineage.com/privacy" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">Privacy</a>
+                ${footerLink(v.manageUrl, c.footerAccount)}
+                ${footerLink(siteUrl("/refunds", locale), c.footerRefundPolicy)}
+                ${footerLink(siteUrl("/terms", locale), c.footerTerms)}
+                ${footerLink(siteUrl("/privacy", locale), c.footerPrivacy)}
               </span>
               <div style="margin-top:14px;">© ${new Date().getFullYear()} Facelineage</div>
             </td>
@@ -549,33 +562,66 @@ export function renderSubscriptionCanceledEmail(v: SubscriptionCanceledEmailVars
 </html>`;
 
   const text = [
-    hello.replace(",", ""),
+    greetingText(c, v.firstName),
     "",
-    "Your Facelineage subscription is canceled.",
-    v.canceledAmount
-      ? `You will not be charged ${v.canceledAmount} again — or anything else.`
-      : "You will not be charged again.",
-    v.accessUntil
-      ? `You keep full access until ${v.accessUntil}. After that the subscription ends on its own.`
-      : "Your access has ended, effective immediately.",
+    k.textCanceled,
+    v.canceledAmount ? fill(k.textNoChargeAmount, { amount: v.canceledAmount }, false) : k.textNoCharge,
+    v.accessUntil ? fill(k.textUntil, { until: v.accessUntil }, false) : k.textEnded,
     "",
-    "Nothing else is needed from you. If you ever see a Facelineage charge after this email,",
-    "write to support@facelineage.com and we'll refund it.",
+    fill(k.textRefund, { email: SUPPORT }, false),
     "",
-    `Changed your mind? Start again any time: ${v.manageUrl}`,
+    fill(k.textComeBack, { url: v.manageUrl }, false),
     "",
-    "— Facelineage",
+    c.signature,
   ].join("\n");
 
   return { subject, html, text };
+}
+
+/**
+ * Substitute `{key}` placeholders. With `html` (default) the template text is
+ * escaped first and values are spliced in raw — callers escape/wrap values
+ * themselves. With `html = false` everything stays plain text.
+ */
+function fill(tpl: string, vars: Record<string, string>, html = true): string {
+  const base = html ? escape(tpl) : tpl;
+  return base.replace(/\{(\w+)\}/g, (m, key: string) => (key in vars ? vars[key] : m));
+}
+
+function greeting(c: EmailCopy, firstName?: string): string {
+  return firstName ? fill(c.helloName, { name: escape(firstName) }) : escape(c.hello);
+}
+
+/** Plain-text greeting without the trailing comma ("Hi Anna"). */
+function greetingText(c: EmailCopy, firstName?: string): string {
+  const g = firstName ? fill(c.helloName, { name: firstName }, false) : c.hello;
+  return g.replace(/[,，]\s*$/, "");
+}
+
+function perIntervalOf(c: EmailCopy, amount: string, interval?: string): string {
+  const tpl = interval ? (c.perInterval as Record<string, string>)[interval] : undefined;
+  return tpl ? tpl.replace("{amount}", amount) : amount;
+}
+
+/** Absolute site URL with the locale prefix (en has none). */
+function siteUrl(path: string, locale: Locale): string {
+  return `${SITE}${locale === DEFAULT_LOCALE ? "" : `/${locale}`}${path}`;
+}
+
+function mailto(email: string, weight: number): string {
+  return `<a href="mailto:${email}" style="color:${BRAND.violet};text-decoration:none;font-weight:${weight};">${email}</a>`;
+}
+
+function footerLink(href: string, label: string): string {
+  return `<a href="${escape(href)}" style="color:${BRAND.inkMuted};text-decoration:underline;margin:0 6px;">${escape(label)}</a>`;
 }
 
 function row(icon: string, title: string, desc: string): string {
   return `<tr>
     <td valign="top" style="padding:6px 0;width:36px;font-size:20px;">${icon}</td>
     <td valign="top" style="padding:6px 0 6px 4px;">
-      <div style="font-size:14px;font-weight:700;color:${BRAND.ink};">${title}</div>
-      <div style="font-size:13px;color:${BRAND.inkSoft};line-height:1.45;">${desc}</div>
+      <div style="font-size:14px;font-weight:700;color:${BRAND.ink};">${escape(title)}</div>
+      <div style="font-size:13px;color:${BRAND.inkSoft};line-height:1.45;">${escape(desc)}</div>
     </td>
   </tr>`;
 }

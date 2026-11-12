@@ -3,6 +3,8 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { analyzeFace } from "./claude";
 import { generateImage } from "./image-gen";
 import { compareParents } from "./claude";
+import { DEFAULT_LOCALE, isLocale, type Locale } from "@/lib/i18n/config";
+import { canonicalQuizAnswers } from "@/lib/i18n/quiz-answers";
 
 type DB = ReturnType<typeof createServiceClient>;
 
@@ -83,7 +85,7 @@ export async function runMainPipeline(
   const { data: row, error } = await db
     .from("analyses")
     .select(
-      "id, user_id, photo_path, generation_status, generation_started_at, generation_attempts, quiz_answers, timezone, country_hint, conclusion, ancestor",
+      "id, user_id, photo_path, generation_status, generation_started_at, generation_attempts, quiz_answers, timezone, country_hint, locale, conclusion, ancestor",
     )
     .eq("id", analysisId)
     .single();
@@ -188,7 +190,8 @@ export async function runMainPipeline(
         context: {
           timezone: row.timezone ?? null,
           countryHint: row.country_hint ?? null,
-          quizAnswers: (row.quiz_answers as Record<string, string> | null) ?? null,
+          quizAnswers: canonicalQuizAnswers(row.quiz_answers as Record<string, string> | null),
+          locale: rowLocale(row.locale),
         },
       });
       console.log(
@@ -534,6 +537,7 @@ export async function runParentsComparisonPipeline(opts: {
     motherMediaType: mother.mediaType,
     fatherImageBase64: father.bytes.toString("base64"),
     fatherMediaType: father.mediaType,
+    locale: selfie.locale,
   });
 
   // Replace any 'pending_input' placeholders with the real result.
@@ -651,7 +655,7 @@ async function uploadGenerated(db: DB, path: string, bytes: Buffer): Promise<str
 async function loadSelfieForAnalysis(db: DB, analysisId: string) {
   const { data: row, error } = await db
     .from("analyses")
-    .select("user_id, photo_path")
+    .select("user_id, photo_path, locale")
     .eq("id", analysisId)
     .single();
   if (error || !row?.photo_path) throw new Error(`Analysis ${analysisId} missing photo`);
@@ -660,5 +664,10 @@ async function loadSelfieForAnalysis(db: DB, analysisId: string) {
     selfieBase64: selfie.bytes.toString("base64"),
     selfieMediaType: selfie.mediaType,
     userId: row.user_id ?? "shared",
+    locale: rowLocale(row.locale),
   };
+}
+
+function rowLocale(value: unknown): Locale {
+  return typeof value === "string" && isLocale(value) ? value : DEFAULT_LOCALE;
 }

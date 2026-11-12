@@ -5,7 +5,6 @@ import {
   PLANS,
   isCurrency,
   formatPrice,
-  localeForCurrency,
   type PlanKey,
   type Currency,
 } from "@/lib/stripe";
@@ -14,9 +13,10 @@ import { runMainPipelineAndWait } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
 import { capturePaymentEvidence } from "@/lib/prevent/evidence";
 import { sendReportReadyEmail } from "@/lib/email/send";
-import { formatChargeMoment } from "@/lib/email/templates";
+import { formatChargeDate, formatChargeMoment, perInterval } from "@/lib/email/templates";
 import { metaEventId, sendMetaEvent } from "@/lib/meta/capi";
 import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
+import { emailCopy } from "@/lib/email/copy";
 import { localized } from "@/lib/i18n/server";
 
 type DB = ReturnType<typeof createServiceClient>;
@@ -202,6 +202,20 @@ export async function provisionIntroPayment(opts: {
     process.env.NEXT_PUBLIC_APP_URL ?? "https://facelineage.com";
 
   after(async () => {
+    // Stamp the customer's language first, so billing emails (reminders,
+    // cancellation) use it even if report generation below fails.
+    const { data: localeRow } = await db
+      .from("analyses")
+      .select("locale")
+      .eq("id", opts.analysisId)
+      .maybeSingle();
+    const reportLocale = isLocale(localeRow?.locale) ? localeRow.locale : DEFAULT_LOCALE;
+    const { error: localeErr } = await db
+      .from("profiles")
+      .update({ locale: reportLocale })
+      .eq("id", opts.userId);
+    if (localeErr) console.error(`[provisioning] profiles.locale update failed:`, localeErr);
+
     console.log(
       `[provisioning] firing pipeline analysis=${opts.analysisId}`,
     );
@@ -250,37 +264,35 @@ export async function provisionIntroPayment(opts: {
 
     // Currency of the actual charge — the PI carries it from the
     // subscription's currency, which we set at checkout from the user's
-    // locale. Email is en-US formatted regardless of locale (template
-    // copy is English only) — Intl.NumberFormat picks the right symbol
-    // from the currency code.
+    // locale. Amounts are formatted for the report's language;
+    // Intl.NumberFormat picks the right symbol from the currency code.
     const currency: Currency = isCurrency(opts.pi.currency)
       ? (opts.pi.currency as Currency)
       : "usd";
     const recurringAmountCents = planMeta.recurring[currency];
-    const paidLocale = localeForCurrency(currency);
-    const reportLocale = isLocale(paidLocale) ? paidLocale : DEFAULT_LOCALE;
 
     try {
       await sendReportReadyEmail(opts.email, {
         // Same locale (→ same currency) the customer paid in. Opened on a
         // device without a session, the report page sends them to sign-in
         // with this report as `next`, never back into the funnel.
+        locale: reportLocale,
         reportUrl: `${baseUrl}${localized(`/report/${opts.analysisId}`, reportLocale)}`,
-        amountPaid: formatPrice(opts.pi.amount, currency, "en"),
-        paymentDate: new Date().toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        }),
+        amountPaid: formatPrice(opts.pi.amount, currency, reportLocale),
+        paymentDate: formatChargeDate(Math.floor(Date.now() / 1000), reportLocale),
         cardLast4,
         // The instant, not just the day. This receipt is the customer's first
         // and most-kept record of when the trial converts, so it has to name
         // the exact moment their cancellation window closes — a bare date
         // reads as "any time on the 18th" and invites a disputed charge.
         trialEnds: trialEndsEpoch
-          ? formatChargeMoment(trialEndsEpoch)
-          : "the end of your trial",
-        recurringAmount: `${formatPrice(recurringAmountCents, currency, "en")}/${planMeta.recurringPeriod}`,
+          ? formatChargeMoment(trialEndsEpoch, reportLocale)
+          : emailCopy(reportLocale).reportReady.trialEndFallback,
+        recurringAmount: perInterval(
+          formatPrice(recurringAmountCents, currency, reportLocale),
+          planMeta.recurringInterval,
+          reportLocale,
+        ),
       });
     } catch (err) {
       console.error(`[provisioning] email failed:`, err);

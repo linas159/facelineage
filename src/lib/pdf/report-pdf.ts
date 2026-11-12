@@ -1,14 +1,11 @@
 import "server-only";
-import {
-  PDFDocument,
-  PDFFont,
-  PDFImage,
-  PDFPage,
-  StandardFonts,
-  rgb,
-  type RGB,
-} from "pdf-lib";
+import { readFile } from "fs/promises";
+import path from "path";
+import fontkit from "@pdf-lib/fontkit";
+import { PDFDocument, PDFFont, PDFImage, PDFPage, rgb, type RGB } from "pdf-lib";
 import type { ReportData } from "@/lib/report-loader";
+import { DEFAULT_LOCALE, HTML_LANG, formatDate, type Locale } from "@/lib/i18n/config";
+import { dictionaryFor, fmt, type Dictionary } from "@/lib/i18n/server";
 
 /**
  * Renders a finished report as a real, downloadable PDF.
@@ -52,27 +49,51 @@ const WHITE = rgb(1, 1, 1);
 export type BuildPdfOptions = {
   /** Printed on the cover so a re-download years later still dates itself. */
   generatedAt?: Date;
+  /** Language for the fixed labels and the date. The AI-written content is
+   *  already in the report's language. */
+  locale?: Locale;
 };
+
+type Labels = Dictionary["pdf"];
+
+// Noto Sans covers Latin Extended + Cyrillic, so Polish, Romanian and
+// Ukrainian reports render with their real letters. Read once per instance.
+const FONT_DIR = path.join(process.cwd(), "src/lib/pdf/fonts");
+let fontBytes: Promise<[Buffer, Buffer]> | null = null;
+function loadFontBytes() {
+  fontBytes ??= Promise.all([
+    readFile(path.join(FONT_DIR, "NotoSans-Regular.ttf")),
+    readFile(path.join(FONT_DIR, "NotoSans-Bold.ttf")),
+  ]).catch((err) => {
+    fontBytes = null;
+    throw err;
+  });
+  return fontBytes;
+}
 
 export async function buildReportPdf(
   report: ReportData,
-  { generatedAt = new Date() }: BuildPdfOptions = {},
+  { generatedAt = new Date(), locale = DEFAULT_LOCALE }: BuildPdfOptions = {},
 ): Promise<Uint8Array> {
+  const t = dictionaryFor(locale).pdf;
   const pdf = await PDFDocument.create();
-  pdf.setTitle("Facelineage - Heritage Report");
+  pdf.registerFontkit(fontkit);
+  pdf.setTitle(t.docTitle);
   pdf.setAuthor("Facelineage");
-  pdf.setSubject("Facial heritage analysis");
+  pdf.setSubject(t.docSubject);
   pdf.setCreator("Facelineage");
+  pdf.setLanguage(HTML_LANG[locale]);
 
+  const [regularBytes, boldBytes] = await loadFontBytes();
   const fonts = {
-    regular: await pdf.embedFont(StandardFonts.Helvetica),
-    bold: await pdf.embedFont(StandardFonts.HelveticaBold),
+    regular: await pdf.embedFont(regularBytes, { subset: true }),
+    bold: await pdf.embedFont(boldBytes, { subset: true }),
   };
 
-  const doc = new Flow(pdf, fonts);
+  const doc = new Flow(pdf, fonts, t);
   const portrait = await embedRemoteImage(pdf, report.ancestor?.imageSrc);
 
-  drawCover(doc, report, generatedAt, portrait);
+  drawCover(doc, report, formatDate(generatedAt, locale, { year: "numeric", month: "long", day: "numeric" }), portrait);
   drawConclusion(doc, report);
   drawEthnicity(doc, report);
   drawTraits(doc, report);
@@ -89,7 +110,7 @@ export async function buildReportPdf(
 // Sections
 // ────────────────────────────────────────────────────────────────────────────
 
-function drawCover(doc: Flow, report: ReportData, when: Date, portrait: PDFImage | null) {
+function drawCover(doc: Flow, report: ReportData, when: string, portrait: PDFImage | null) {
   const bandH = 320;
   doc.page.drawRectangle({
     x: 0,
@@ -103,10 +124,10 @@ function drawCover(doc: Flow, report: ReportData, when: Date, portrait: PDFImage
   doc.tracked("FACELINEAGE", { size: 12, font: doc.fonts.bold, color: WHITE, tracking: 3.2 });
 
   doc.y = PAGE.h - 132;
-  doc.text("Your heritage", { size: 38, font: doc.fonts.bold, color: WHITE, lineGap: 1.15 });
-  doc.text("report", { size: 38, font: doc.fonts.bold, color: WHITE, lineGap: 1.15 });
+  doc.text(doc.t.coverTitle1, { size: 38, font: doc.fonts.bold, color: WHITE, lineGap: 1.15 });
+  doc.text(doc.t.coverTitle2, { size: 38, font: doc.fonts.bold, color: WHITE, lineGap: 1.15 });
   doc.gap(16);
-  doc.text("The story written into your features — read from a single photograph.", {
+  doc.text(doc.t.coverSubtitle, {
     size: 11.5,
     color: WHITE,
     maxWidth: CONTENT_W - 190,
@@ -137,20 +158,17 @@ function drawCover(doc: Flow, report: ReportData, when: Date, portrait: PDFImage
 
   const top = report.regions[0];
   if (top) {
-    doc.label("Strongest signal");
+    doc.label(doc.t.strongestSignal);
     doc.text(`${top.name} — ${fmtPct(top.pct)}`, { size: 20, font: doc.fonts.bold, color: INK });
     doc.gap(16);
   }
 
-  doc.label("Facial uniqueness");
+  doc.label(doc.t.facialUniqueness);
   doc.text(`${report.uniquenessScore}/100`, { size: 20, font: doc.fonts.bold, color: GREEN });
   doc.gap(16);
 
-  doc.label("Prepared");
-  doc.text(
-    when.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
-    { size: 11.5, color: INK_SOFT },
-  );
+  doc.label(doc.t.prepared);
+  doc.text(when, { size: 11.5, color: INK_SOFT });
 }
 
 function drawConclusion(doc: Flow, report: ReportData) {
@@ -158,14 +176,14 @@ function drawConclusion(doc: Flow, report: ReportData) {
   // section below continues on this page whether or not there's a conclusion.
   doc.newPage();
   if (!report.conclusion) return;
-  doc.heading("Your heritage at a glance", "Conclusion");
+  doc.heading(doc.t.conclusionTitle, doc.t.conclusionEyebrow);
   doc.panel(report.conclusion);
   doc.gap(28);
 }
 
 function drawEthnicity(doc: Flow, report: ReportData) {
   if (report.regions.length === 0) return;
-  doc.heading("Where your features come from", "Ethnicity breakdown");
+  doc.heading(doc.t.ethnicityTitle, doc.t.ethnicityEyebrow);
 
   for (const region of report.regions) {
     // Name, bar and blurb read as one unit — keep them on the same page.
@@ -191,7 +209,7 @@ function drawEthnicity(doc: Flow, report: ReportData) {
 function drawTraits(doc: Flow, report: ReportData) {
   if (report.facialTraits.length === 0) return;
   doc.newPage();
-  doc.heading("Six features, six clues", "Facial traits");
+  doc.heading(doc.t.traitsTitle, doc.t.traitsEyebrow);
 
   for (const trait of report.facialTraits) {
     doc.ensure(72);
@@ -215,7 +233,7 @@ function drawAncestor(doc: Flow, report: ReportData, portrait: PDFImage | null) 
   const a = report.ancestor;
   if (!a?.name) return;
   doc.newPage();
-  doc.heading("A face from your line", "Your ancestor");
+  doc.heading(doc.t.ancestorTitle, doc.t.ancestorEyebrow);
   if (portrait) doc.image(portrait, 330);
 
   doc.text(a.name, { size: 20, font: doc.fonts.bold, color: INK });
@@ -233,7 +251,7 @@ function drawAncestor(doc: Flow, report: ReportData, portrait: PDFImage | null) 
 function drawCulture(doc: Flow, report: ReportData) {
   if (report.culturalInsights.length === 0) return;
   doc.newPage();
-  doc.heading("Where your face feels at home", "Cultural insights");
+  doc.heading(doc.t.cultureTitle, doc.t.cultureEyebrow);
 
   for (const insight of report.culturalInsights) {
     doc.ensure(72);
@@ -247,7 +265,7 @@ function drawCulture(doc: Flow, report: ReportData) {
 function drawStory(doc: Flow, report: ReportData) {
   if (!report.heritageStory) return;
   doc.newPage();
-  doc.heading("Your heritage story", "Narrative");
+  doc.heading(doc.t.storyTitle, doc.t.storyEyebrow);
 
   for (const para of report.heritageStory.split(/\n{2,}/)) {
     const trimmed = para.trim();
@@ -262,11 +280,11 @@ function drawScore(doc: Flow, report: ReportData) {
   doc.gap(20);
   doc.rule();
   doc.gap(26);
-  doc.label("Facial uniqueness score");
+  doc.label(doc.t.scoreLabel);
   doc.text(`${report.uniquenessScore}/100`, { size: 44, font: doc.fonts.bold, color: GREEN });
   doc.gap(10);
   doc.text(
-    `Your combination of features is rarer than ${report.uniquenessScore}% of the analyses we have run.`,
+    fmt(doc.t.scoreBody, { n: report.uniquenessScore }),
     { size: 10.5, color: INK_SOFT },
   );
 }
@@ -290,13 +308,22 @@ class Flow {
   page: PDFPage;
   y: number;
   private readonly pages: PDFPage[] = [];
+  private readonly glyphs: Set<number>;
 
   constructor(
     private pdf: PDFDocument,
     readonly fonts: Fonts,
+    readonly t: Labels,
   ) {
     this.page = this.addPage();
     this.y = PAGE.h - MARGIN;
+    // Regular and Bold share coverage; intersect anyway so neither can throw.
+    const bold = new Set(fonts.bold.getCharacterSet());
+    this.glyphs = new Set(fonts.regular.getCharacterSet().filter((c) => bold.has(c)));
+  }
+
+  sanitize(text: string): string {
+    return sanitize(text, this.glyphs);
   }
 
   private addPage(): PDFPage {
@@ -329,7 +356,7 @@ class Flow {
     } = opts;
 
     const lineHeight = size * lineGap;
-    for (const line of wrap(sanitize(raw), font, size, maxWidth)) {
+    for (const line of wrap(this.sanitize(raw), font, size, maxWidth)) {
       this.ensure(lineHeight);
       this.y -= lineHeight;
       this.page.drawText(line, { x: MARGIN, y: this.y + lineHeight * 0.25, size, font, color });
@@ -345,7 +372,7 @@ class Flow {
     raw: string,
     { size = 9, font = this.fonts.bold, color = VIOLET, tracking = 1.5 }: TextOptions & { tracking?: number },
   ): void {
-    const line = sanitize(raw).replace(/\s+/g, " ").trim();
+    const line = this.sanitize(raw).replace(/\s+/g, " ").trim();
     if (!line) return;
     const lineHeight = size * 1.45;
     this.ensure(lineHeight);
@@ -380,7 +407,7 @@ class Flow {
   panel(body: string): void {
     const size = 11;
     const lineHeight = size * 1.5;
-    const lines = wrap(sanitize(body), this.fonts.regular, size, CONTENT_W - 40);
+    const lines = wrap(this.sanitize(body), this.fonts.regular, size, CONTENT_W - 40);
     const boxH = lines.length * lineHeight + 36;
     this.ensure(boxH);
 
@@ -443,7 +470,7 @@ class Flow {
   /** Stamp the footer on every page, once the page count is known. */
   finish(): void {
     this.pages.forEach((page, i) => {
-      page.drawText("Facelineage - your heritage report", {
+      page.drawText(this.sanitize(this.t.footer), {
         x: MARGIN,
         y: MARGIN - 24,
         size: 8,
@@ -503,10 +530,10 @@ function wrap(text: string, font: PDFFont, size: number, maxWidth: number): stri
 }
 
 /**
- * The 14 standard PDF fonts are WinAnsi-encoded and pdf-lib throws on any
- * character it can't encode. Model output is full of smart quotes, dashes and
- * ellipses, so fold those to ASCII and drop anything else outside Latin-1
- * rather than failing the whole download.
+ * pdf-lib throws on any character the embedded font has no glyph for. Model
+ * output can contain emoji, CJK or exotic punctuation, so fold the common
+ * typographic characters to a covered fallback and drop anything else the
+ * font can't draw rather than failing the whole download.
  */
 const SUBSTITUTIONS: Record<string, string> = {
   "‘": "'", "’": "'", "‚": ",", "‛": "'",
@@ -514,23 +541,22 @@ const SUBSTITUTIONS: Record<string, string> = {
   "–": "-", "—": "-", "―": "-", "−": "-",
   "…": "...", "•": "-", "→": "->",
   "′": "'", "″": '"', "‹": "<", "›": ">",
-  " ": " ", " ": " ", " ": " ", "​": "",
+  "\u2009": " ", "\u202f": " ", "\u00a0": " ", "\u200b": "",
   "™": "(TM)",
 };
 
-function sanitize(text: string): string {
+function sanitize(text: string, glyphs: Set<number>): string {
   let out = "";
-  for (const ch of text ?? "") {
-    const sub = SUBSTITUTIONS[ch];
-    if (sub !== undefined) {
-      out += sub;
-      continue;
-    }
+  for (const ch of (text ?? "").normalize("NFC")) {
     const code = ch.codePointAt(0)!;
-    if (ch === "\n" || (code >= 0x20 && code <= 0x7e) || (code >= 0xa0 && code <= 0xff)) {
+    if (ch === "\n") {
       out += ch;
+    } else if (glyphs.has(code) && code >= 0x20) {
+      out += ch;
+    } else if (SUBSTITUTIONS[ch] !== undefined) {
+      out += SUBSTITUTIONS[ch];
     }
-    // Everything else (emoji, CJK, combining marks) is dropped.
+    // Everything else (emoji, CJK, stray control chars) is dropped.
   }
   return out;
 }

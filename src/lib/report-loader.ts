@@ -10,6 +10,7 @@ import {
   type CulturalInsight,
   type Ancestor,
 } from "@/lib/report-data";
+import { DEFAULT_LOCALE, isLocale, type Locale } from "@/lib/i18n/config";
 
 const DEMO_CONCLUSION =
   "Your features converge on a phenotype shaped most strongly in the British Isles and the wider Northwestern European cluster. Layered through it are softer Southern European traits and a faint Central Asian signature — markers of ancient trade, migration, and the long mingling of peoples across the Eurasian steppe.";
@@ -55,6 +56,9 @@ export type ReportData = {
    *  (idle + !isPaid → paywall) from the brief window after Stripe redirect
    *  before the webhook flips the row (idle + isPaid → "generating"). */
   isPaid: boolean;
+  /** Language the report was generated in; pages render in it. Null when
+   *  there is no row (missing) or for the demo fixtures. */
+  locale: Locale | null;
   conclusion: string;
   heritageStory: string;
   uniquenessScore: number;
@@ -86,6 +90,7 @@ export async function loadReport(
     return {
       status: "demo",
       isPaid: true,
+      locale: null,
       conclusion: DEMO_CONCLUSION,
       heritageStory: DEMO_STORY,
       uniquenessScore: 87,
@@ -102,7 +107,7 @@ export async function loadReport(
   const { data: row } = await sb
     .from("analyses")
     .select(
-      "id, user_id, status, generation_status, generation_error, is_paid, conclusion, regions, facial_traits, cultural_insights, heritage_story, ancestor, uniqueness_score_v2",
+      "id, user_id, status, generation_status, generation_error, is_paid, locale, conclusion, regions, facial_traits, cultural_insights, heritage_story, ancestor, uniqueness_score_v2",
     )
     .eq("id", analysisId)
     .maybeSingle();
@@ -113,18 +118,20 @@ export async function loadReport(
 
   const gs = (row.generation_status ?? "idle") as ReportStatus;
   const isPaid = !!row.is_paid;
+  const locale: Locale = isLocale(row.locale) ? row.locale : DEFAULT_LOCALE;
   const svc = createServiceClient();
 
   // An unpaid row is a draft: never expose report content before payment.
   // Every view treats it as `idle`, which the report page sends to the paywall.
   if (!isPaid) {
-    return { ...blank("idle"), isPaid: false };
+    return { ...blank("idle"), isPaid: false, locale };
   }
 
   if (gs !== "ready") {
     return {
       ...blank(gs),
       isPaid,
+      locale,
       errorMessage: row.generation_error ?? undefined,
       // Even while the main report is generating, the user may have already
       // unlocked upsells (rare but possible). Load them so the report shows
@@ -154,6 +161,7 @@ export async function loadReport(
   return {
     status: "ready",
     isPaid,
+    locale,
     conclusion: row.conclusion ?? DEMO_CONCLUSION,
     heritageStory: row.heritage_story ?? DEMO_STORY,
     uniquenessScore: row.uniqueness_score_v2 ?? 87,
@@ -181,6 +189,7 @@ function blank(status: ReportStatus): ReportData {
   return {
     status,
     isPaid: false,
+    locale: null,
     conclusion: "",
     heritageStory: "",
     uniquenessScore: 0,

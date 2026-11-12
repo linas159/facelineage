@@ -29,7 +29,7 @@ export async function GET(
 
   let bytes: Uint8Array;
   try {
-    bytes = await buildReportPdf(report);
+    bytes = await buildReportPdf(report, { locale: report.locale ?? undefined });
   } catch (err) {
     console.error(`[report-pdf] build failed analysis=${id}:`, err);
     return jsonError("Could not build the PDF", 500);

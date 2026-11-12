@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { INTL_LOCALE, isLocale } from "@/lib/i18n/config";
 
 if (!process.env.STRIPE_SECRET_KEY) {
   // Don't throw at import — allow build without keys. Server actions check at runtime.
@@ -90,14 +91,6 @@ export function localeForCurrency(currency: string | null | undefined): string {
   return match?.[0] ?? "en";
 }
 
-/** Intl.NumberFormat locale to use for each app locale. */
-const LOCALE_FOR_INTL: Record<string, string> = {
-  en: "en-US",
-  ro: "ro-RO",
-  pl: "pl-PL",
-  ua: "uk-UA",
-};
-
 /**
  * Format a minor-unit amount as a localized currency string. Drops the
  * decimal part when the amount is a whole major unit — so RON 27 renders
@@ -108,7 +101,7 @@ export function formatPrice(
   currency: Currency,
   locale: string = "en",
 ): string {
-  const intlLocale = LOCALE_FOR_INTL[locale] ?? "en-US";
+  const intlLocale = isLocale(locale) ? INTL_LOCALE[locale] : "en-US";
   const fractionDigits = cents % 100 === 0 ? 0 : 2;
   if (currency === "uah" && locale === "ua") return formatUah(cents, fractionDigits);
   return new Intl.NumberFormat(intlLocale, {

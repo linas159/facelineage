@@ -58,14 +58,4 @@ export function localizeHref(href: string, locale: Locale): string {
   return `/${locale}${clean === "/" ? "" : clean}`;
 }
 
-/**
- * Simple template-literal interpolation for translation strings that
- * contain `{var}` placeholders. Pass values keyed by name.
- *
- *   fmt(t.email.terms, { terms: "Terms", privacy: "Privacy Policy" })
- */
-export function fmt(template: string, vars: Record<string, string | number>): string {
-  return template.replace(/\{(\w+)\}/g, (_, k) =>
-    k in vars ? String(vars[k]) : `{${k}}`,
-  );
-}
+export { fmt } from "./format";

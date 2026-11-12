@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { analyzeFace } from "@/lib/ai/claude";
+import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n/config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -42,12 +43,15 @@ export async function POST(req: Request) {
       ? body.mediaType
       : "image/jpeg";
 
+  const context = (body.context ?? {}) as NonNullable<Parameters<typeof analyzeFace>[0]["context"]>;
+  const locale = isLocale(context.locale) ? context.locale : DEFAULT_LOCALE;
+
   const startedAt = Date.now();
   try {
     const result = await analyzeFace({
       imageBase64: body.imageBase64,
       mediaType,
-      context: (body.context ?? {}) as Parameters<typeof analyzeFace>[0]["context"],
+      context: { ...context, locale },
     });
     return NextResponse.json({ ok: true, elapsedMs: Date.now() - startedAt, result });
   } catch (err) {

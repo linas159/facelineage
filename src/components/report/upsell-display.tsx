@@ -2,33 +2,19 @@ import Link from "next/link";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { UpsellArtifact, UpsellSku } from "@/lib/report-loader";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 
 interface Props {
-  analysisId: string;
   upsells: Partial<Record<UpsellSku, UpsellArtifact[]>>;
   upsellsGenerating: UpsellSku[];
+  t: Dictionary["upsellDisplay"];
+  /** Localized link to the parents-photo upload page. */
+  parentsHref: string;
 }
 
-const ETHNICITY_LABEL: Record<string, string> = {
-  "east-asia": "Han Chinese",
-  "west-africa": "Yoruba",
-  "northern-europe": "Sami",
-  "south-asia": "Bengali",
-  andes: "Quechua",
-};
-
-const AGES_LABEL: Record<string, string> = {
-  "ancient-rome": "Ancient Rome",
-  "tang-china": "Tang China",
-  "viking-age": "Viking Age",
-  "medieval-europe": "Medieval Europe",
-  "edo-japan": "Edo Japan",
-  "ottoman-empire": "Ottoman Empire",
-  "victorian-era": "Victorian Era",
-  "1920s-modern": "1920s",
-};
-
-export function UpsellDisplay({ analysisId, upsells, upsellsGenerating }: Props) {
+export function UpsellDisplay({ upsells, upsellsGenerating, t, parentsHref }: Props) {
+  const ethnicityLabels: Record<string, string> = t.ethnicityVariants;
+  const agesLabels: Record<string, string> = t.agesVariants;
   const ethnicity = upsells.upsell_v2_ethnicity ?? [];
   const ages = upsells.upsell_v2_ages ?? [];
   const partner = upsells.upsell_v2_partner ?? [];
@@ -49,24 +35,22 @@ export function UpsellDisplay({ analysisId, upsells, upsellsGenerating }: Props)
     <div className="space-y-8">
       {upsellsGenerating.length > 0 && (
         <Card className="border-2 border-[var(--color-orange)]/30 bg-[var(--color-orange-pale)] text-center">
-          <CardTitle className="mb-1">Your add-ons are generating</CardTitle>
-          <CardDescription>
-            Hang tight — this usually takes under a minute. The page will refresh when they&apos;re ready.
-          </CardDescription>
+          <CardTitle className="mb-1">{t.generatingTitle}</CardTitle>
+          <CardDescription>{t.generatingBody}</CardDescription>
         </Card>
       )}
 
       {ethnicity.length > 0 && (
         <Section
-          eyebrow="Heritage Mirror"
-          title="Your face across cultures"
+          eyebrow={t.ethnicityEyebrow}
+          title={t.ethnicityTitle}
         >
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {ethnicity.map((a) => (
               <ImageTile
                 key={a.id}
                 src={a.url}
-                label={ETHNICITY_LABEL[a.variant ?? ""] ?? a.variant ?? "Variation"}
+                label={ethnicityLabels[a.variant ?? ""] ?? a.variant ?? t.variationFallback}
               />
             ))}
           </div>
@@ -75,15 +59,15 @@ export function UpsellDisplay({ analysisId, upsells, upsellsGenerating }: Props)
 
       {ages.length > 0 && (
         <Section
-          eyebrow="Through The Ages"
-          title="You, across history"
+          eyebrow={t.agesEyebrow}
+          title={t.agesTitle}
         >
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {ages.map((a) => (
               <ImageTile
                 key={a.id}
                 src={a.url}
-                label={AGES_LABEL[a.variant ?? ""] ?? a.variant ?? "Era"}
+                label={agesLabels[a.variant ?? ""] ?? a.variant ?? t.eraFallback}
                 aspect="aspect-[3/4]"
               />
             ))}
@@ -92,13 +76,13 @@ export function UpsellDisplay({ analysisId, upsells, upsellsGenerating }: Props)
       )}
 
       {partner.length > 0 && (
-        <Section eyebrow="Future Partner" title="The face that balances yours">
+        <Section eyebrow={t.partnerEyebrow} title={t.partnerTitle}>
           <Card className="overflow-hidden !p-0">
             {partner[0]?.url && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={partner[0].url}
-                alt="Future partner"
+                alt={t.partnerAlt}
                 className="block aspect-[4/5] w-full object-cover"
               />
             )}
@@ -107,15 +91,15 @@ export function UpsellDisplay({ analysisId, upsells, upsellsGenerating }: Props)
       )}
 
       {parents.length > 0 && (
-        <Section eyebrow="Parents Comparison" title="What each parent gave you">
+        <Section eyebrow={t.parentsEyebrow} title={t.parentsTitle}>
           {parents.some((p) => p.artifactType === "pending_input") ? (
             <Card className="text-center">
               <CardDescription className="mb-4">
-                We need a photo of each parent to run the comparison. Takes 30 seconds.
+                {t.parentsNeedPhotos}
               </CardDescription>
-              <Link href={`/upsell/parents?analysis=${analysisId}`}>
+              <Link href={parentsHref}>
                 <Button size="block" className="mx-auto max-w-xs">
-                  Upload parents&apos; photos
+                  {t.parentsUploadCta}
                 </Button>
               </Link>
             </Card>
@@ -129,12 +113,12 @@ export function UpsellDisplay({ analysisId, upsells, upsellsGenerating }: Props)
                     {md.breakdown && <p>{md.breakdown}</p>}
                     {md.mother_traits && (
                       <p>
-                        <span className="font-bold text-[var(--color-ink)]">From your mother:</span> {md.mother_traits}
+                        <span className="font-bold text-[var(--color-ink)]">{t.fromMother}</span> {md.mother_traits}
                       </p>
                     )}
                     {md.father_traits && (
                       <p>
-                        <span className="font-bold text-[var(--color-ink)]">From your father:</span> {md.father_traits}
+                        <span className="font-bold text-[var(--color-ink)]">{t.fromFather}</span> {md.father_traits}
                       </p>
                     )}
                   </div>
@@ -146,20 +130,20 @@ export function UpsellDisplay({ analysisId, upsells, upsellsGenerating }: Props)
       )}
 
       {book.length > 0 && (
-        <Section eyebrow="Heritage Guidebook" title="Your ancestry research companion">
+        <Section eyebrow={t.bookEyebrow} title={t.bookTitle}>
           <Card className="text-center">
             <CardDescription className="mb-4">
-              Methods, tools, and frameworks for taking your heritage discovery further — printable PDF, yours forever.
+              {t.bookBody}
             </CardDescription>
             {book[0]?.url ? (
               <a href={book[0].url} target="_blank" rel="noopener noreferrer">
                 <Button size="block" className="mx-auto max-w-xs">
-                  Download guidebook (PDF)
+                  {t.bookDownload}
                 </Button>
               </a>
             ) : (
               <p className="text-xs text-[var(--color-ink-muted)]">
-                Your guidebook is being prepared. Check back shortly.
+                {t.bookPreparing}
               </p>
             )}
           </Card>

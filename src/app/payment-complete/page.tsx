@@ -5,7 +5,8 @@ import { stripe, resolveCustomerEmail, PLANS, type PlanKey } from "@/lib/stripe"
 import { createServiceClient } from "@/lib/supabase/server";
 import { provisionIntroPayment } from "@/lib/provisioning";
 import { getOrCreateAuthUser } from "@/lib/auth-user";
-import { getLocale, localized } from "@/lib/i18n/server";
+import { fmt, getDictionary, getLocale, localized } from "@/lib/i18n/server";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { FunnelShell } from "@/components/funnel-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
@@ -39,9 +40,10 @@ export default async function PaymentCompletePage({
   searchParams: Promise<SearchParams>;
 }) {
   const params = await searchParams;
+  const t = (await getDictionary()).paymentComplete;
 
   if (!stripe || !params.payment_intent || !params.analysis) {
-    return failed("Missing payment details. If you were charged, please contact support.");
+    return failed(t, t.missingDetails);
   }
 
   // 1. Verify with Stripe (don't trust redirect_status alone).
@@ -49,10 +51,10 @@ export default async function PaymentCompletePage({
   try {
     pi = await stripe.paymentIntents.retrieve(params.payment_intent);
   } catch {
-    return failed("Couldn't verify the payment. Please contact support.");
+    return failed(t, t.couldntVerify);
   }
   if (pi.status !== "succeeded") {
-    return failed(`Payment is ${pi.status}. Please try again or contact support.`);
+    return failed(t, fmt(t.notSucceeded, { status: pi.status }));
   }
 
   // Prefer the email collected on /email — most reliable. Fall back to
@@ -82,7 +84,7 @@ export default async function PaymentCompletePage({
   if (!email) email = pi.receipt_email ?? undefined;
 
   if (!email || !analysisId) {
-    return failed("Payment confirmed but we couldn't link it to your account. Please contact support.");
+    return failed(t, t.couldntLink);
   }
 
   const db = createServiceClient();
@@ -96,7 +98,7 @@ export default async function PaymentCompletePage({
   // this exact step concurrently for the same email.
   const user = await getOrCreateAuthUser(db, email);
   if (!user) {
-    return paidButNotSignedIn(signInToReport);
+    return paidButNotSignedIn(t, signInToReport);
   }
 
   // 3. Resolve the subscription + PM that own this PI, then run the
@@ -166,7 +168,7 @@ export default async function PaymentCompletePage({
   });
   const hashedToken = linkData?.properties?.hashed_token;
   if (!hashedToken) {
-    return paidButNotSignedIn(signInToReport);
+    return paidButNotSignedIn(t, signInToReport);
   }
 
   // Preserve locale through the magic-link redirect. /auth/confirm itself
@@ -179,11 +181,13 @@ export default async function PaymentCompletePage({
   );
 }
 
-function failed(message: string) {
+type PaymentCompleteCopy = Dictionary["paymentComplete"];
+
+function failed(t: PaymentCompleteCopy, message: string) {
   return (
     <FunnelShell>
       <Card className="mt-10 text-center">
-        <CardTitle className="mb-2">Hmm, something didn&apos;t line up.</CardTitle>
+        <CardTitle className="mb-2">{t.title}</CardTitle>
         <CardDescription>{message}</CardDescription>
       </Card>
     </FunnelShell>
@@ -195,18 +199,14 @@ function failed(message: string) {
  * dead end: the report is still generated and emailed, and signing in with
  * the checkout email opens it — no need to retake the test or pay again.
  */
-function paidButNotSignedIn(signInHref: string) {
+function paidButNotSignedIn(t: PaymentCompleteCopy, signInHref: string) {
   return (
     <FunnelShell>
       <Card className="mt-10 text-center">
-        <CardTitle className="mb-2">Payment received — your report is on its way</CardTitle>
-        <CardDescription className="mb-5">
-          We couldn&apos;t sign you in automatically. Your report is being generated and we&apos;ll
-          email you a link when it&apos;s ready. You can also sign in with the email you used at
-          checkout to open it. There&apos;s no need to take the test or pay again.
-        </CardDescription>
+        <CardTitle className="mb-2">{t.paidTitle}</CardTitle>
+        <CardDescription className="mb-5">{t.paidBody}</CardDescription>
         <Link href={signInHref}>
-          <Button size="block">Sign in to see my report →</Button>
+          <Button size="block">{t.paidCta}</Button>
         </Link>
       </Card>
     </FunnelShell>

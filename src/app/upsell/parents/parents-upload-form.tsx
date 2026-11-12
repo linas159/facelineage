@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { uploadParentPhotos } from "@/lib/actions/upload-parents";
 import { normalizeToJpeg } from "@/lib/image-normalize";
+import { fmt, useI18n } from "@/lib/i18n/client";
 
 interface Props {
   analysisId: string;
@@ -15,6 +16,7 @@ export function ParentsUploadForm({ analysisId }: Props) {
   const [father, setFather] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const t = useI18n().t.parentsUpload;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,15 +36,16 @@ export function ParentsUploadForm({ analysisId }: Props) {
       // On success the action redirects.
     } catch (err) {
       if (err instanceof Error && err.message.includes("NEXT_REDIRECT")) throw err;
-      setError(err instanceof Error ? err.message : "Upload failed");
+      console.error("[parents-upload]", err);
+      setError(t.uploadFailed);
       setBusy(false);
     }
   }
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <PhotoPicker label="Mother" value={mother} onChange={setMother} />
-      <PhotoPicker label="Father" value={father} onChange={setFather} />
+      <PhotoPicker label={t.mother} value={mother} onChange={setMother} />
+      <PhotoPicker label={t.father} value={father} onChange={setFather} />
 
       {error && (
         <Card className="border-2 border-[var(--color-coral)]/30 bg-[var(--color-coral)]/5">
@@ -51,7 +54,7 @@ export function ParentsUploadForm({ analysisId }: Props) {
       )}
 
       <Button size="block" type="submit" disabled={busy || !mother || !father}>
-        {busy ? "Comparing…" : "Run comparison →"}
+        {busy ? t.comparing : t.run}
       </Button>
     </form>
   );
@@ -66,6 +69,7 @@ function PhotoPicker({
   value: File | null;
   onChange: (f: File | null) => void;
 }) {
+  const t = useI18n().t.parentsUpload;
   const url = value ? URL.createObjectURL(value) : null;
   return (
     <label className="block">
@@ -75,10 +79,10 @@ function PhotoPicker({
       >
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={url} alt={`${label} preview`} className="h-full w-auto rounded-md object-cover" />
+          <img src={url} alt={fmt(t.preview, { label })} className="h-full w-auto rounded-md object-cover" />
         ) : (
           <span className="text-sm text-[var(--color-ink-muted)]">
-            Tap to choose a photo
+            {t.tapToChoose}
           </span>
         )}
       </div>

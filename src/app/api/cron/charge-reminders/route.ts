@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { stripe, priceAmountFor, isCurrency, formatPrice, type Currency } from "@/lib/stripe";
+import {
+  stripe,
+  priceAmountFor,
+  isCurrency,
+  formatPrice,
+  type Currency,
+} from "@/lib/stripe";
 import {
   renderUpcomingChargeEmail,
+  formatChargeDate,
   formatChargeMoment,
   calendarDaysUntil,
 } from "@/lib/email/templates";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
+import { billingLocale } from "@/lib/email/copy";
 import { createServiceClient } from "@/lib/supabase/server";
 import { Resend } from "resend";
 
@@ -81,7 +90,8 @@ export async function GET(req: Request) {
   const FROM = process.env.EMAIL_FROM ?? "Facelineage <reports@facelineage.com>";
   const REPLY_TO = process.env.EMAIL_REPLY_TO ?? "support@facelineage.com";
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://facelineage.com";
-  const manageUrl = `${baseUrl}/account`;
+  const manageUrlFor = (locale: Locale) =>
+    `${baseUrl}${locale === DEFAULT_LOCALE ? "" : `/${locale}`}/account`;
 
   const now = Math.floor(Date.now() / 1000);
   const windowEnd = now + windowHours * 3600;
@@ -106,12 +116,13 @@ export async function GET(req: Request) {
   // We scope to currently-billable statuses (a charge can only come from one
   // of these) and paginate so accounts with >1k subscribers aren't truncated.
   const db = createServiceClient();
-  const chargedSubIds = new Set<string>();
+  // Paid subscription id → owning user, used to look up the user's language.
+  const chargedSubIds = new Map<string, string>();
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await db
       .from("subscriptions")
-      .select("stripe_subscription_id")
+      .select("stripe_subscription_id, user_id")
       .in("status", ["trialing", "active", "past_due"])
       .range(from, from + PAGE - 1);
     if (error) {
@@ -119,7 +130,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "DB read failed" }, { status: 500 });
     }
     for (const row of data ?? []) {
-      if (row.stripe_subscription_id) chargedSubIds.add(row.stripe_subscription_id);
+      if (row.stripe_subscription_id) chargedSubIds.set(row.stripe_subscription_id, row.user_id);
     }
     if (!data || data.length < PAGE) break;
   }
@@ -205,7 +216,6 @@ export async function GET(req: Request) {
           skipped++;
           continue;
         }
-        const chargeAmount = formatPrice(amountCents, subCurrency);
         const interval = price.recurring?.interval ?? undefined;
 
         const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
@@ -247,14 +257,20 @@ export async function GET(req: Request) {
           last4Of(customer.invoice_settings?.default_payment_method ?? null);
 
         const firstName = customer.name?.trim().split(/\s+/)[0] || undefined;
+
+        // The language the customer bought in (stamped at provisioning);
+        // older accounts fall back to the language implied by the currency.
+        const { data: profile } = await db
+          .from("profiles")
+          .select("locale")
+          .eq("id", chargedSubIds.get(sub.id)!)
+          .maybeSingle();
+        const locale = billingLocale(profile?.locale, subCurrency);
+
+        const chargeAmount = formatPrice(amountCents, subCurrency, locale);
         // Rendered in UTC, like the moment and the day count below it, so the
         // three can never contradict each other in the same email.
-        const chargeDate = new Date(chargeAt * 1000).toLocaleDateString("en-US", {
-          timeZone: "UTC",
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        });
+        const chargeDate = formatChargeDate(chargeAt, locale);
 
         const { subject, html, text } = renderUpcomingChargeEmail({
           firstName,
@@ -262,10 +278,11 @@ export async function GET(req: Request) {
           chargeAmount,
           interval,
           chargeDate,
-          chargeMoment: formatChargeMoment(chargeAt),
+          chargeMoment: formatChargeMoment(chargeAt, locale),
           daysUntilCharge: calendarDaysUntil(chargeAt, now),
           cardLast4,
-          manageUrl,
+          manageUrl: manageUrlFor(locale),
+          locale,
         });
 
         if (dryRun) {

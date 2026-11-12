@@ -6,7 +6,8 @@ import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { UpsellSections, type UpsellId } from "@/components/upsell-sections";
 import { UpsellDisplay } from "@/components/report/upsell-display";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { getLocale, localized } from "@/lib/i18n/server";
+import { getDictionary, getLocale, localized } from "@/lib/i18n/server";
+import { DEFAULT_LOCALE, formatDate, isLocale } from "@/lib/i18n/config";
 import type { UpsellArtifact, UpsellSku } from "@/lib/report-loader";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ type AnalysisRow = {
   generation_status: "idle" | "queued" | "running" | "ready" | "failed" | null;
   conclusion: string | null;
   regions: Array<{ name?: string; pct?: number; color?: string }> | null;
+  locale: string | null;
 };
 
 const SKU_TO_UI_ID: Record<UpsellSku, UpsellId> = {
@@ -34,10 +36,12 @@ export default async function DashboardPage() {
   if (!user) {
     redirect(localized(`/sign-up?next=${encodeURIComponent(localized("/dashboard", locale))}`, locale));
   }
+  const dict = await getDictionary();
+  const t = dict.dashboard;
 
   const { data } = await sb
     .from("analyses")
-    .select("id, created_at, generation_status, conclusion, regions, is_paid")
+    .select("id, created_at, generation_status, conclusion, regions, is_paid, locale")
     .order("created_at", { ascending: false });
 
   // Unpaid analyses are drafts; never show report content before payment.
@@ -115,18 +119,16 @@ export default async function DashboardPage() {
     <FunnelShell>
       <div className="pt-6">
         <p className="mb-1 text-xs font-bold uppercase tracking-wider text-[var(--color-orange)]">
-          My library
+          {t.eyebrow}
         </p>
         <div className="mb-6 flex items-end justify-between">
-          <h1>Your reports</h1>
+          <h1>{t.title}</h1>
         </div>
 
         {reports.length === 0 ? (
           <Card>
-            <CardTitle>No reports yet</CardTitle>
-            <CardDescription className="mt-1">
-              Take the quiz, snap a selfie, and we&apos;ll get started.
-            </CardDescription>
+            <CardTitle>{t.emptyTitle}</CardTitle>
+            <CardDescription className="mt-1">{t.emptyBody}</CardDescription>
           </Card>
         ) : (
           <div className="flex flex-col gap-4">
@@ -135,23 +137,27 @@ export default async function DashboardPage() {
               const inFlight =
                 r.generation_status === "queued" || r.generation_status === "running";
               return (
-                <Link key={r.id} href={localized(`/report/${r.id}`, locale)}>
+                // Each report opens in its own language (saves a redirect hop).
+                <Link
+                  key={r.id}
+                  href={localized(`/report/${r.id}`, isLocale(r.locale) ? r.locale : DEFAULT_LOCALE)}
+                >
                   <Card className="cursor-pointer transition-transform hover:-translate-y-0.5">
                     <div className="flex items-center justify-between">
                       <div>
                         <CardTitle>
-                          {top?.name ?? (inFlight ? "Generating…" : "Untitled")}
+                          {top?.name ?? (inFlight ? t.generating : t.untitled)}
                         </CardTitle>
                         <CardDescription className="mt-1">
-                          {new Date(r.created_at).toLocaleDateString()}
+                          {formatDate(r.created_at, locale, { year: "numeric", month: "short", day: "numeric" })}
                         </CardDescription>
                       </div>
                       {top?.pct ? (
                         <Chip color="orange">{top.pct.toFixed(0)}%</Chip>
                       ) : inFlight ? (
-                        <Chip color="yellow">In progress</Chip>
+                        <Chip color="yellow">{t.inProgress}</Chip>
                       ) : r.generation_status === "failed" ? (
-                        <Chip color="coral">Failed</Chip>
+                        <Chip color="coral">{t.failed}</Chip>
                       ) : null}
                     </div>
                   </Card>
@@ -163,10 +169,10 @@ export default async function DashboardPage() {
 
         <div className="mt-8 grid gap-3">
           <Link href={localized("/quiz/1", locale)}>
-            <Button size="block">+ New analysis</Button>
+            <Button size="block">{t.newAnalysis}</Button>
           </Link>
           <Link href={localized("/account", locale)}>
-            <Button size="block" variant="secondary">Account & subscription</Button>
+            <Button size="block" variant="secondary">{t.account}</Button>
           </Link>
         </div>
 
@@ -174,11 +180,12 @@ export default async function DashboardPage() {
         {latestReady && ownedSkus.size > 0 && (
           <div className="mt-10">
             <p className="mb-1 text-center text-xs font-bold uppercase tracking-wider text-[var(--color-orange)]">
-              Your add-ons
+              {t.addonsEyebrow}
             </p>
-            <h2 className="mb-4 text-center text-2xl">Unlocked for you</h2>
+            <h2 className="mb-4 text-center text-2xl">{t.addonsTitle}</h2>
             <UpsellDisplay
-              analysisId={latestReady.id}
+              t={dict.upsellDisplay}
+              parentsHref={localized(`/upsell/parents?analysis=${latestReady.id}`, locale)}
               upsells={grouped}
               upsellsGenerating={generatingSkus}
             />

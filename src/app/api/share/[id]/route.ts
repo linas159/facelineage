@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { appOrigin, getOrCreateShareToken, shareUrl } from "@/lib/share";
+import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n/config";
+import { dictionaryFor, fmt, localized } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,24 +16,28 @@ export const runtime = "nodejs";
  * someone who can already see the analysis.
  */
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
 
-  // The demo report has no DB row — share the demo page itself.
+  // The demo report has no DB row — share the demo page itself, in the
+  // language the sharer is browsing (API routes carry no locale prefix).
   if (id === "demo") {
+    const ref = new URL(req.headers.get("referer") ?? appOrigin()).pathname.split("/")[1];
+    const locale = isLocale(ref) ? ref : DEFAULT_LOCALE;
+    const t = dictionaryFor(locale).share;
     return NextResponse.json({
-      url: `${appOrigin()}/report/demo`,
-      title: "My Facelineage heritage report",
-      text: "I traced my face back through 12,000 years of heritage. Take a look:",
+      url: `${appOrigin()}${localized("/report/demo", locale)}`,
+      title: t.shareTitle,
+      text: t.shareTextGeneric,
     });
   }
 
   const sb = await createClient();
   const { data: row } = await sb
     .from("analyses")
-    .select("id, generation_status, regions, is_paid")
+    .select("id, generation_status, regions, is_paid, locale")
     .eq("id", id)
     .maybeSingle();
 
@@ -48,14 +54,15 @@ export async function POST(
     return NextResponse.json({ error: "Could not create share link" }, { status: 500 });
   }
 
+  // Shared in the report's own language — the recipient lands on the same.
+  const locale = isLocale(row.locale) ? row.locale : DEFAULT_LOCALE;
+  const t = dictionaryFor(locale).share;
   const top = (row.regions as Array<{ name?: string; pct?: number }> | null)?.[0];
-  const text = top?.name
-    ? `My face traces back to ${top.name} heritage. See the full breakdown:`
-    : "I traced my face back through 12,000 years of heritage. Take a look:";
+  const text = top?.name ? fmt(t.shareTextTop, { region: top.name }) : t.shareTextGeneric;
 
   return NextResponse.json({
-    url: shareUrl(token),
-    title: "My Facelineage heritage report",
+    url: shareUrl(token, locale),
+    title: t.shareTitle,
     text,
   });
 }

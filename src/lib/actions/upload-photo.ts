@@ -58,6 +58,8 @@ export async function uploadPhoto(formData: FormData) {
   })();
   const countryHint = tz ? guessCountryFromTimezone(tz) : null;
 
+  const locale = await getLocale();
+
   // Insert analysis row (service client for pre-auth users).
   const dbClient = user ? supabase : createServiceClient();
   const { data: analysis, error: dbErr } = await dbClient
@@ -69,6 +71,9 @@ export async function uploadPhoto(formData: FormData) {
       quiz_answers: quizAnswers,
       timezone: tz,
       country_hint: countryHint,
+      // The report, PDF and emails for this analysis are written in the
+      // language the customer is browsing in.
+      locale,
     })
     .select("id")
     .single();
@@ -87,7 +92,6 @@ export async function uploadPhoto(formData: FormData) {
     });
   }
 
-  const locale = await getLocale();
   redirect(localized(`/analyzing?id=${analysis.id}`, locale));
 }
 

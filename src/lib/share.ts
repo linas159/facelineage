@@ -2,6 +2,7 @@ import "server-only";
 import { randomBytes } from "crypto";
 import { cache } from "react";
 import { createServiceClient } from "@/lib/supabase/server";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 
 /** 12 random bytes → 16 base64url chars. Unguessable, still short enough
  *  to survive a WhatsApp line-break. */
@@ -11,8 +12,9 @@ export function appOrigin(): string {
   return (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 }
 
-export function shareUrl(token: string): string {
-  return `${appOrigin()}/s/${token}`;
+export function shareUrl(token: string, locale: Locale = DEFAULT_LOCALE): string {
+  const path = locale === DEFAULT_LOCALE ? `/s/${token}` : `/${locale}/s/${token}`;
+  return `${appOrigin()}${path}`;
 }
 
 function mintToken(): string {

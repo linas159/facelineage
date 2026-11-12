@@ -14,6 +14,11 @@
 //   npm run eval:analysis
 //   npm run eval:analysis -- --dir ./eval/faces --runs 2
 //
+//   # same faces, report written in Polish / Ukrainian — accuracy should stay
+//   # within noise of the English run. --out saves each report's countries so
+//   # runs in different languages can be diffed for consistency.
+//   npm run eval:analysis -- --locale pl --out eval/pl.json
+//
 // eval/faces/labels.json maps each filename to what is actually true:
 //
 //   [
@@ -41,6 +46,9 @@ const DIR = path.resolve(flag("dir", "./eval/faces"));
 // Repeat runs surface *instability* — the same photo scored right once and
 // wrong the next time is a different problem from one scored wrong every time.
 const RUNS = Number(flag("runs", "1"));
+// App locale the report is written in (en, pl, ua, ro, …).
+const LOCALE = flag("locale", "en");
+const OUT = flag("out", null);
 
 const GRADED_TRAITS = [
   { key: "eye-color", label: "eye_color", name: "Eye colour" },
@@ -84,7 +92,7 @@ async function judge({ traitName, truth, description }) {
         role: "user",
         content:
           `${traitName}.\n\nGround truth: "${truth}"\n\n` +
-          `What the analysis wrote: "${description}"\n\n` +
+          `What the analysis wrote (it may be in a language other than English): "${description}"\n\n` +
           `Does the description identify the same colour as the ground truth? ` +
           `Judge only the colour — ignore any claims about ancestry, populations or regions. ` +
           `Call the grade tool.`,
@@ -109,7 +117,7 @@ async function analyze(entry) {
     body: JSON.stringify({
       imageBase64: fs.readFileSync(file).toString("base64"),
       mediaType,
-      context: entry.context ?? {},
+      context: { ...(entry.context ?? {}), locale: LOCALE },
     }),
   });
 
@@ -145,7 +153,7 @@ const MARK = { match: "✓", close: "~", miss: "✗" };
 async function main() {
   const labels = loadLabels();
   console.log(
-    `Scoring ${labels.length} photo(s) × ${RUNS} run(s) against ${BASE}\n`,
+    `Scoring ${labels.length} photo(s) × ${RUNS} run(s) in locale "${LOCALE}" against ${BASE}\n`,
   );
 
   const tally = Object.fromEntries(
@@ -153,6 +161,7 @@ async function main() {
   );
   const errors = [];
   const latencies = [];
+  const saved = [];
 
   for (const entry of labels) {
     for (let run = 1; run <= RUNS; run++) {
@@ -197,6 +206,20 @@ async function main() {
       console.log(
         `  ${tag.padEnd(28)} ${String(Math.round(out.elapsedMs / 1000)).padStart(3)}s  ${marks.join("  |  ")}`,
       );
+      saved.push({
+        file: entry.file,
+        run,
+        locale: LOCALE,
+        marks,
+        // Language-independent fields, so reports in different languages
+        // can be compared directly.
+        countries: (out.result.regions ?? [])
+          .flatMap((r) => r.countries ?? [])
+          .map((c) => ({ iso2: c.iso2, pct: c.pct }))
+          .sort((a, b) => b.pct - a.pct),
+        uniqueness_score: out.result.uniqueness_score,
+        conclusion: out.result.conclusion,
+      });
     }
   }
 
@@ -230,6 +253,11 @@ async function main() {
     `Completed      ${attempted - errors.length}/${attempted}` +
       (errors.length ? `  — ${errors.length} failed to produce a report` : "  — no failures"),
   );
+
+  if (OUT) {
+    fs.writeFileSync(OUT, JSON.stringify(saved, null, 2));
+    console.log(`Saved          ${saved.length} report(s) to ${OUT}`);
+  }
 
   // A photo that never produced a report is the failure that matters most:
   // an inaccurate report is a complaint, a missing one is a refund.

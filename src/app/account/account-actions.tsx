@@ -7,7 +7,11 @@ import { Button } from "@/components/ui/button";
  * "Manage in Stripe Portal" button. Hits /api/billing-portal which creates
  * a Customer Portal session, then redirects the browser to the returned URL.
  */
-export function ManagePortalButton() {
+export function ManagePortalButton({
+  labels,
+}: {
+  labels: { button: string; opening: string; error: string; network: string };
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -24,9 +28,10 @@ export function ManagePortalButton() {
         window.location.href = data.url;
         return;
       }
-      setError(data.error ?? "Could not open billing portal");
+      if (data.error) console.warn("[billing-portal]", data.error);
+      setError(labels.error);
     } catch {
-      setError("Network error — please try again");
+      setError(labels.network);
     } finally {
       setBusy(false);
     }
@@ -35,7 +40,7 @@ export function ManagePortalButton() {
   return (
     <>
       <Button size="block" variant="secondary" onClick={open} disabled={busy}>
-        {busy ? "Opening…" : "Manage in Stripe Portal"}
+        {busy ? labels.opening : labels.button}
       </Button>
       {error && (
         <p className="text-center text-xs text-[var(--color-coral)]">{error}</p>

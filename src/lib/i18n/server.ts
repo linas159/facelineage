@@ -30,6 +30,12 @@ export async function getDictionary(): Promise<Dictionary> {
   return DICTIONARIES[locale];
 }
 
+/** Dictionary for an explicit locale — for content tied to a stored locale
+ *  (a report, an email) rather than the current request. */
+export function dictionaryFor(locale: Locale): Dictionary {
+  return DICTIONARIES[locale];
+}
+
 /**
  * Prefix `href` with `/{locale}` when the active locale isn't the
  * default. Use in any server component or server action that builds a
@@ -45,3 +51,4 @@ export function localized(href: string, locale: Locale): string {
 }
 
 export type { Dictionary };
+export { fmt } from "./format";

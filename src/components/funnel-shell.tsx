@@ -40,7 +40,7 @@ export async function FunnelShell({
         <div className="mx-auto flex max-w-md items-center justify-between px-5 py-4">
           {showBack ? (
             <Link
-              href={backHref ?? "#"}
+              href={backHref ? localized(backHref, locale) : "#"}
               className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-[var(--shadow-chip)] text-[var(--color-ink-soft)]"
               aria-label="Back"
             >

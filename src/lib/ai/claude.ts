@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { AI_LANGUAGE_NAME, DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 
 // Single client. Lazy-construct so importing this file in environments
 // without the key (e.g. type-check during build) doesn't blow up.
@@ -160,7 +161,18 @@ Defer to the face on phenotype; defer to the quiz on family stories. Example: fa
 - Probabilistic, observational, specific. Never deterministic ("you are X%") — always "your features most resemble".
 - No medical commentary. No racial-essentialist or judgmental language. No comments on attractiveness.
 - Be respectful and culturally accurate when describing regions and customs.
-- If the photo is too poor quality to read confidently (severe blur, occlusion, extreme angle), still return a best-effort answer but lean toward broader regional groupings rather than specific countries.`;
+- If the photo is too poor quality to read confidently (severe blur, occlusion, extreme angle), still return a best-effort answer but lean toward broader regional groupings rather than specific countries.
+
+# Output language
+
+The user message names the output language. The language changes only the *words* the customer reads — never the analysis. Observe the face, weigh the context and choose regions, countries, percentages, traits, ancestor and score exactly as you would for an English report. Think in English.
+
+- Write these customer-facing fields entirely in the output language: conclusion, regions[].name, regions[].blurb, regions[].countries[].name, facial_traits[].name, facial_traits[].description, cultural_insights[].name, cultural_insights[].description, heritage_story, ancestor.era, ancestor.place, ancestor.description.
+- Keep these fields in English / as specified above, whatever the output language: every \`key\`, iso2, color, region_keys, supporting_regions, and both image_prompt fields (the image model only reads English).
+- ancestor.name: a period-correct name in the form used at that place and time — do not translate it into the output language (e.g. keep "Edmund of Northumbria"; a date suffix like "c. 1780" follows the output language's conventions).
+- Use the standard exonyms of the output language for countries, regions, peoples and cultures (e.g. Polish "Niemcy", Ukrainian "Німеччина").
+- Write as a native writer of that language would: natural, idiomatic prose with correct grammar, cases and agreement — not a word-for-word translation of English. Use the language's own quotation marks and number formatting inside prose.
+- Same lengths, specificity and tone as the English report. Never mix languages inside a field.`;
 
 /**
  * The report shape. Strict (every field required, no extra keys) because it is
@@ -264,8 +276,10 @@ export type AnalyzeContext = {
   timezone?: string | null;
   /** ISO-2 country derived from timezone, e.g. "LT". Soft hint only. */
   countryHint?: string | null;
-  /** Pre-quiz answers keyed by question slug. */
+  /** Pre-quiz answers keyed by question slug, as canonical English labels. */
   quizAnswers?: Record<string, string> | null;
+  /** App locale the report is written in. Defaults to English. */
+  locale?: Locale | null;
 };
 
 /**
@@ -323,12 +337,26 @@ class RetryableAnalysisError extends Error {
   readonly problems: string[];
   /** True when the response ran out of output budget rather than omitting fields. */
   readonly truncated: boolean;
+  /** True when the prose came back in the wrong language. */
+  readonly wrongLanguage: boolean;
+  /** The otherwise-valid report rejected for its language — kept as a fallback. */
+  readonly report?: AnalysisResult;
 
-  constructor(message: string, opts: { problems?: string[]; truncated?: boolean } = {}) {
+  constructor(
+    message: string,
+    opts: {
+      problems?: string[];
+      truncated?: boolean;
+      wrongLanguage?: boolean;
+      report?: AnalysisResult;
+    } = {},
+  ) {
     super(message);
     this.name = "RetryableAnalysisError";
     this.problems = opts.problems ?? [];
+    this.report = opts.report;
     this.truncated = opts.truncated ?? false;
+    this.wrongLanguage = opts.wrongLanguage ?? false;
   }
 }
 
@@ -354,9 +382,14 @@ class AnalysisRefusedError extends Error {
  * fixes: a truncated response needs *less* prose, while an omitted field needs
  * that specific field. Naming the problem turns the retry into a repair.
  */
-function retryNudge(prev: RetryableAnalysisError | null): string {
+function retryNudge(prev: RetryableAnalysisError | null, locale: Locale): string {
   if (!prev) return "";
   const parts = ["\n\nYour previous attempt did not produce a usable report."];
+  if (prev.wrongLanguage) {
+    parts.push(
+      `Its customer-facing text was not written in ${AI_LANGUAGE_NAME[locale]}. Write every customer-facing field in ${AI_LANGUAGE_NAME[locale]}, as the Output language section requires.`,
+    );
+  }
   if (prev.truncated) {
     parts.push(
       "It ran out of response budget before finishing. Keep every description to at most two sentences and heritage_story to two short paragraphs.",
@@ -388,6 +421,10 @@ export async function analyzeFace(opts: {
 }): Promise<AnalysisResult> {
   let lastError: unknown;
   let lastAnalysisError: RetryableAnalysisError | null = null;
+  // A valid report that only failed the language check. A paying customer
+  // must never lose a usable report to that check, so whenever the retries
+  // can't do better (budget spent, later attempt failed) we return this.
+  let wrongLanguageReport: AnalysisResult | null = null;
   let attempt = 1;
   const startedAt = Date.now();
 
@@ -401,6 +438,7 @@ export async function analyzeFace(opts: {
     } catch (err) {
       lastError = err;
       lastAnalysisError = err instanceof RetryableAnalysisError ? err : null;
+      if (lastAnalysisError?.report) wrongLanguageReport = lastAnalysisError.report;
       const message = err instanceof Error ? err.message : String(err);
 
       // A refusal is not something a retry fixes — only a different model is.
@@ -415,6 +453,7 @@ export async function analyzeFace(opts: {
 
       if (!isRetryable(err) || attempt === MAX_ANALYSIS_ATTEMPTS) {
         console.error(`[claude] analyze attempt ${attempt} failed (final): ${message}`);
+        if (wrongLanguageReport) return keepWrongLanguage(wrongLanguageReport);
         throw err;
       }
       console.warn(`[claude] analyze attempt ${attempt} failed, retrying: ${message}`);
@@ -423,7 +462,13 @@ export async function analyzeFace(opts: {
     }
   }
 
+  if (wrongLanguageReport) return keepWrongLanguage(wrongLanguageReport);
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+function keepWrongLanguage(report: AnalysisResult): AnalysisResult {
+  console.warn("[claude] retries exhausted — keeping a valid report in the wrong language");
+  return report;
 }
 
 async function analyzeFaceOnce(
@@ -440,7 +485,8 @@ async function analyzeFaceOnce(
 
   // Repair instructions for a retry. This lives in the user turn (after the
   // cached system prefix) so prompt caching is unaffected.
-  const nudge = retryNudge(previousFailure);
+  const locale = opts.context?.locale ?? DEFAULT_LOCALE;
+  const nudge = retryNudge(previousFailure, locale);
 
   const model = modelForAttempt(attempt);
 
@@ -487,7 +533,7 @@ async function analyzeFaceOnce(
           {
             type: "text",
             text:
-              `Analyze this selfie following the instructions in the system message, then return the full report as JSON. The face is the primary input — the side context below is only a soft prior.\n\n${contextBlock}${nudge}`,
+              `Analyze this selfie following the instructions in the system message, then return the full report as JSON. The face is the primary input — the side context below is only a soft prior.\n\nOutput language: ${AI_LANGUAGE_NAME[locale]}.\n\n${contextBlock}${nudge}`,
           },
         ],
       },
@@ -533,10 +579,23 @@ async function analyzeFaceOnce(
 
   const input = normalizeReport(parsed);
   try {
-    return validateAnalysis(input);
+    const report = validateAnalysis(input);
+    if (!looksLikeLanguage(`${report.conclusion}\n${report.heritage_story}`, locale)) {
+      // A report in the wrong language still beats no report for a customer
+      // who has paid, so the final attempt keeps it rather than failing.
+      if (attempt < MAX_ANALYSIS_ATTEMPTS) {
+        throw new RetryableAnalysisError(
+          `Report prose is not in ${AI_LANGUAGE_NAME[locale]}`,
+          { wrongLanguage: true, report },
+        );
+      }
+      console.warn(`[claude] analyze attempt=${attempt} kept a report not in ${AI_LANGUAGE_NAME[locale]}`);
+    }
+    return report;
   } catch (err) {
     // Record what actually came back so a malformed shape can be diagnosed
     // from the logs instead of guessed at.
+    if (err instanceof RetryableAnalysisError && err.wrongLanguage) throw err;
     console.warn(`[claude] analyze attempt=${attempt} unusable report shape: ${describeShape(input)} text=${text.slice(0, 300)}`);
     throw err;
   }
@@ -689,6 +748,30 @@ function validateAnalysis(raw: unknown): AnalysisResult {
   return raw as AnalysisResult;
 }
 
+/**
+ * Cheap check that prose is in the requested language: script share for
+ * Cyrillic, characteristic diacritics for Latin-script languages (two
+ * paragraphs of real Polish or Romanian never lack them). Catches the model
+ * slipping back into English; it is not a language identifier.
+ */
+const LANGUAGE_CHECK: Record<Locale, (text: string) => boolean> = {
+  en: (t) => cyrillicShare(t) < 0.2,
+  ro: (t) => /[ăâîșțşţ]/i.test(t),
+  pl: (t) => /[ąćęłńóśźż]/i.test(t),
+  ua: (t) => cyrillicShare(t) > 0.6,
+};
+
+function looksLikeLanguage(text: string, locale: Locale): boolean {
+  return LANGUAGE_CHECK[locale](text);
+}
+
+function cyrillicShare(text: string): number {
+  const letters = text.match(/\p{L}/gu) ?? [];
+  if (letters.length === 0) return 0;
+  const cyrillic = letters.filter((ch) => /\p{Script=Cyrillic}/u.test(ch)).length;
+  return cyrillic / letters.length;
+}
+
 /** Transient failures worth another attempt: truncation, bad shape, 429/5xx, network. */
 function isRetryable(err: unknown): boolean {
   if (err instanceof RetryableAnalysisError) return true;
@@ -725,7 +808,8 @@ Hard rules:
 - "father_traits": same shape, for the father.
 - Be specific and observational. Mention concrete features only.
 - No judgments about attractiveness. No medical or racial-essentialist language.
-- If a photo is missing, of poor quality, or clearly not a parent (cartoon, animal), say so politely in "breakdown" and leave the per-parent traits as a one-sentence summary.`;
+- If a photo is missing, of poor quality, or clearly not a parent (cartoon, animal), say so politely in "breakdown" and leave the per-parent traits as a one-sentence summary.
+- Write all three fields in the output language named in the user message: natural, idiomatic prose as a native writer would phrase it, never a word-for-word translation. Observe and compare exactly as you would in English; the language changes only the words.`;
 
 const PARENTS_TOOL = {
   name: "parents_comparison",
@@ -748,6 +832,8 @@ export async function compareParents(opts: {
   motherMediaType: "image/jpeg" | "image/png" | "image/webp";
   fatherImageBase64: string;
   fatherMediaType: "image/jpeg" | "image/png" | "image/webp";
+  /** App locale to write the comparison in. Defaults to English. */
+  locale?: Locale | null;
 }): Promise<ParentsComparison> {
   let lastError: unknown;
   let attempt = 1;
@@ -785,6 +871,8 @@ async function compareParentsOnce(opts: {
   motherMediaType: "image/jpeg" | "image/png" | "image/webp";
   fatherImageBase64: string;
   fatherMediaType: "image/jpeg" | "image/png" | "image/webp";
+  /** App locale to write the comparison in. Defaults to English. */
+  locale?: Locale | null;
 }, attempt: number): Promise<ParentsComparison> {
   const c = client();
   const model = modelForAttempt(attempt);
@@ -810,7 +898,10 @@ async function compareParentsOnce(opts: {
           { type: "image", source: { type: "base64", media_type: opts.motherMediaType, data: opts.motherImageBase64 } },
           { type: "text", text: "Photo 3 — the user's father:" },
           { type: "image", source: { type: "base64", media_type: opts.fatherMediaType, data: opts.fatherImageBase64 } },
-          { type: "text", text: "Compare them and call parents_comparison." },
+          {
+            type: "text",
+            text: `Output language: ${AI_LANGUAGE_NAME[opts.locale ?? DEFAULT_LOCALE]}.\n\nCompare them and call parents_comparison.`,
+          },
         ],
       },
     ],

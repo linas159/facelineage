@@ -126,6 +126,7 @@ export default async function QuizStepPage({ params }: { params: Promise<{ step:
 
   // Resolve localized labels for the options.
   const resolvedOptions = data.options.map((o) => ({
+    key: o.optionKey,
     label: (stepDict as Record<string, string>)[o.optionKey] ?? o.optionKey,
     emoji: o.emoji,
     iconSrc: o.iconSrc,

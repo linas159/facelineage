@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { capture } from "@/lib/posthog/client";
+import { localizeHref, useI18n } from "@/lib/i18n/client";
 
 interface Props {
   analysisId: string;
@@ -24,7 +25,10 @@ type ShareResponse = { url?: string; title?: string; text?: string; error?: stri
  * Download: pulls the generated PDF as a blob so we can show progress and a
  * real error instead of navigating the tab to a failed request.
  */
-export function ReportActions({ analysisId, backHref = "/dashboard" }: Props) {
+export function ReportActions({ analysisId, backHref }: Props) {
+  const { t: dict, locale } = useI18n();
+  const t = dict.reportActions;
+  const back = backHref ?? localizeHref("/dashboard", locale);
   const [sharing, setSharing] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [link, setLink] = useState<string | null>(null);
@@ -45,17 +49,18 @@ export function ReportActions({ analysisId, backHref = "/dashboard" }: Props) {
       const res = await fetch(`/api/share/${analysisId}`, { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as ShareResponse;
       if (!res.ok || !data.url) {
-        setError(data.error ?? "Could not create a share link");
+        if (data.error) console.warn("[share]", data.error);
+        setError(res.status === 409 ? t.notFinished : t.shareError);
         return;
       }
       setLink(data.url);
       payload = {
-        title: data.title ?? "My Facelineage heritage report",
+        title: data.title ?? dict.share.shareTitle,
         text: data.text ?? "",
         url: data.url,
       };
     } catch {
-      setError("Network error — please try again");
+      setError(t.networkError);
     } finally {
       setSharing(false);
     }
@@ -98,7 +103,8 @@ export function ReportActions({ analysisId, backHref = "/dashboard" }: Props) {
       const res = await fetch(`/api/report/${analysisId}/pdf`);
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(data.error ?? "Could not build your PDF");
+        if (data.error) console.warn("[pdf]", data.error);
+        setError(res.status === 409 ? t.notFinished : t.pdfError);
         return;
       }
       const blob = await res.blob();
@@ -118,7 +124,7 @@ export function ReportActions({ analysisId, backHref = "/dashboard" }: Props) {
 
       capture("report_pdf_downloaded", { analysis_id: analysisId });
     } catch {
-      setError("Network error — please try again");
+      setError(t.networkError);
     } finally {
       setDownloading(false);
     }
@@ -127,17 +133,17 @@ export function ReportActions({ analysisId, backHref = "/dashboard" }: Props) {
   return (
     <div className="mt-8 flex flex-col gap-3">
       <Button size="block" onClick={share} disabled={sharing}>
-        {sharing ? "Preparing link…" : copied ? "Link copied ✓" : "Share my result"}
+        {sharing ? t.preparing : copied ? t.linkCopied : t.share}
       </Button>
 
       <Button size="block" variant="secondary" onClick={download} disabled={downloading}>
-        {downloading ? "Building your PDF…" : "Download PDF"}
+        {downloading ? t.building : t.download}
       </Button>
 
       {link && (
         <div className="rounded-[var(--radius-input)] bg-[var(--color-bg-warm)] p-3">
           <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[var(--color-ink-muted)]">
-            Your share link
+            {t.linkLabel}
           </p>
           <div className="flex items-center gap-2">
             <input
@@ -145,14 +151,14 @@ export function ReportActions({ analysisId, backHref = "/dashboard" }: Props) {
               value={link}
               onFocus={(e) => e.currentTarget.select()}
               className="min-w-0 flex-1 rounded-full bg-white px-3 py-2 text-xs text-[var(--color-ink-soft)]"
-              aria-label="Share link"
+              aria-label={t.linkLabel}
             />
             <Button size="sm" variant="outline" onClick={() => copy(link)}>
-              {copied ? "Copied" : "Copy"}
+              {copied ? t.copied : t.copy}
             </Button>
           </div>
           <p className="mt-2 text-[11px] text-[var(--color-ink-muted)]">
-            Anyone with this link can see a summary of your report — not your photo.
+            {t.linkNote}
           </p>
         </div>
       )}
@@ -161,8 +167,8 @@ export function ReportActions({ analysisId, backHref = "/dashboard" }: Props) {
         <p className="text-center text-xs text-[var(--color-coral)]">{error}</p>
       )}
 
-      <Link href={backHref}>
-        <Button size="block" variant="ghost">Back to my reports</Button>
+      <Link href={back}>
+        <Button size="block" variant="ghost">{t.back}</Button>
       </Link>
     </div>
   );
