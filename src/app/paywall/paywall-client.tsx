@@ -183,10 +183,15 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         publishableKey?: string;
         subscriptionId?: string;
         error?: string;
+        alreadyPaid?: boolean;
       };
+      if (data.alreadyPaid) {
+        router.push(localizeHref(`/report/${analysisId}`, locale));
+        return;
+      }
       if (data.requiresCheckout) {
         // Fallback — saved PM not usable, go to full checkout.
-        router.push(`/checkout?plan=${selected}&analysis=${analysisId}`);
+        router.push(localizeHref(`/checkout?plan=${selected}&analysis=${analysisId}`, locale));
         return;
       }
       if (!data.clientSecret || !data.publishableKey || !data.subscriptionId) {
@@ -219,7 +224,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         body: JSON.stringify({ subscriptionId: data.subscriptionId }),
       }).catch(() => { /* webhook is the safety net */ });
 
-      router.push(`/report/${analysisId}`);
+      router.push(localizeHref(`/report/${analysisId}`, locale));
       return;
     } catch (err) {
       setChargeError(err instanceof Error ? err.message : "Charge failed");

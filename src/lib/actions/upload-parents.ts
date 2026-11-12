@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { runParentsComparisonPipeline } from "@/lib/ai/pipeline";
+import { getLocale, localized } from "@/lib/i18n/server";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp", "image/heic"];
@@ -59,7 +60,7 @@ export async function uploadParentPhotos(formData: FormData) {
     console.error("Parents comparison failed:", err);
   });
 
-  redirect(`/report/${analysisId}`);
+  redirect(localized(`/report/${analysisId}`, await getLocale()));
 }
 
 function ext(name: string): string {

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { FunnelShell } from "@/components/funnel-shell";
 import { ParentsUploadForm } from "./parents-upload-form";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale, localized } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -11,11 +12,15 @@ export default async function ParentsUpsellPage({
   searchParams: Promise<{ analysis?: string }>;
 }) {
   const params = await searchParams;
-  if (!params.analysis) redirect("/dashboard");
+  const locale = await getLocale();
+  if (!params.analysis) redirect(localized("/dashboard", locale));
 
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
-  if (!user) redirect(`/sign-up?next=/upsell/parents?analysis=${params.analysis}`);
+  if (!user) {
+    const next = localized(`/upsell/parents?analysis=${params.analysis}`, locale);
+    redirect(localized(`/sign-up?next=${encodeURIComponent(next)}`, locale));
+  }
 
   return (
     <FunnelShell showBack backHref={`/report/${params.analysis}`}>

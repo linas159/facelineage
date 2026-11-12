@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { PLANS, formatPrice, pickCurrency } from "@/lib/stripe";
-import { getLocale, getDictionary } from "@/lib/i18n/server";
+import { getLocale, getDictionary, localized } from "@/lib/i18n/server";
 import { ManagePortalButton } from "./account-actions";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,8 @@ const SUB_STATUS_LABEL: Record<string, { label: string; color: "green" | "yellow
 export default async function AccountPage() {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
-  if (!user) redirect("/sign-up?next=/account");
+  const locale = await getLocale();
+  if (!user) redirect(localized(`/sign-up?next=${encodeURIComponent(localized("/account", locale))}`, locale));
 
   const { data: sub } = await sb
     .from("subscriptions")
@@ -38,7 +39,6 @@ export default async function AccountPage() {
         year: "numeric",
       })
     : null;
-  const locale = await getLocale();
   const dict = await getDictionary();
   const currency = pickCurrency(locale);
   const planLabel = planMeta ? dict.paywall[planMeta.labelKey] : null;

@@ -6,6 +6,8 @@ import { GeneratingFlow } from "@/components/report/generating-flow";
 import { ReportActions } from "@/components/report/report-actions";
 import type { UpsellId } from "@/components/upsell-sections";
 import { loadReport } from "@/lib/report-loader";
+import { createClient } from "@/lib/supabase/server";
+import { getLocale, localized } from "@/lib/i18n/server";
 import type { UpsellSku } from "@/lib/report-loader";
 
 const SKU_TO_UI_ID: Record<UpsellSku, UpsellId> = {
@@ -18,16 +20,27 @@ const SKU_TO_UI_ID: Record<UpsellSku, UpsellId> = {
 
 export default async function ReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const locale = await getLocale();
   const report = await loadReport(id);
 
   if (report.status === "missing") {
-    redirect("/dashboard");
+    // RLS hides the row from signed-out visitors, so "missing" usually means
+    // a paying customer opened the emailed link on another device/browser.
+    // Send them to sign in and straight back here — not to the dashboard,
+    // whose sign-up bounce drops the report and points at the quiz.
+    const sb = await createClient();
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) {
+      const next = localized(`/report/${id}`, locale);
+      redirect(localized(`/sign-up?next=${encodeURIComponent(next)}`, locale));
+    }
+    redirect(localized("/dashboard", locale));
   }
 
   // Unpaid draft (e.g., the user navigated here via the dashboard before
   // checking out). Send them to the paywall for this specific analysis.
   if (report.status === "idle" && !report.isPaid) {
-    redirect(`/paywall?analysis=${id}`);
+    redirect(localized(`/paywall?analysis=${id}`, locale));
   }
 
   // In-flight: show the generating placeholder until polling sees `ready`.

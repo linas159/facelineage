@@ -66,11 +66,14 @@ export async function POST(req: NextRequest) {
   const db = createServiceClient();
   const { data: analysis } = await db
     .from("analyses")
-    .select("id, user_id, email")
+    .select("id, user_id, email, is_paid")
     .eq("id", analysisId)
     .maybeSingle();
   if (!analysis) {
     return NextResponse.json({ error: "Analysis not found" }, { status: 404 });
+  }
+  if (analysis.is_paid) {
+    return NextResponse.json({ error: "Already paid", alreadyPaid: true }, { status: 409 });
   }
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";

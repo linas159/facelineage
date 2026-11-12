@@ -30,8 +30,10 @@ const SKU_TO_UI_ID: Record<UpsellSku, UpsellId> = {
 export default async function DashboardPage() {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
-  if (!user) redirect("/sign-up");
   const locale = await getLocale();
+  if (!user) {
+    redirect(localized(`/sign-up?next=${encodeURIComponent(localized("/dashboard", locale))}`, locale));
+  }
 
   const { data } = await sb
     .from("analyses")

@@ -58,11 +58,14 @@ export async function POST(req: NextRequest) {
   // Verify the analysis belongs to this user.
   const { data: analysis } = await supabase
     .from("analyses")
-    .select("id")
+    .select("id, is_paid")
     .eq("id", analysisId)
     .maybeSingle();
   if (!analysis) {
     return NextResponse.json({ error: "Analysis not found" }, { status: 404 });
+  }
+  if (analysis.is_paid) {
+    return NextResponse.json({ error: "Already paid", alreadyPaid: true }, { status: 409 });
   }
 
   // Resolve the Stripe customer + saved default payment method.

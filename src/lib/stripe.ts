@@ -78,6 +78,18 @@ export function pickCurrency(locale: string | null | undefined): Currency {
   return LOCALE_TO_CURRENCY[locale] ?? DEFAULT_CURRENCY;
 }
 
+/**
+ * Reverse of `pickCurrency`: the app locale a charge in `currency` was made
+ * from. Used where only the Stripe object is at hand (e.g. building the
+ * report link in the receipt email) so the link lands on the same locale —
+ * and therefore the same currency — the customer bought in.
+ */
+export function localeForCurrency(currency: string | null | undefined): string {
+  const c = currency?.toLowerCase();
+  const match = Object.entries(LOCALE_TO_CURRENCY).find(([, cur]) => cur === c);
+  return match?.[0] ?? "en";
+}
+
 /** Intl.NumberFormat locale to use for each app locale. */
 const LOCALE_FOR_INTL: Record<string, string> = {
   en: "en-US",

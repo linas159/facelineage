@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import type Stripe from "stripe";
 import { stripe, resolveCustomerEmail, PLANS, type PlanKey } from "@/lib/stripe";
@@ -6,6 +7,7 @@ import { provisionIntroPayment } from "@/lib/provisioning";
 import { getOrCreateAuthUser } from "@/lib/auth-user";
 import { getLocale, localized } from "@/lib/i18n/server";
 import { FunnelShell } from "@/components/funnel-shell";
+import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
@@ -84,6 +86,9 @@ export default async function PaymentCompletePage({
   }
 
   const db = createServiceClient();
+  const locale = await getLocale();
+  const reportPath = localized(`/report/${analysisId}`, locale);
+  const signInToReport = localized(`/sign-up?next=${encodeURIComponent(reportPath)}`, locale);
 
   // 2. Find or create the Supabase user. We use the admin API so we can
   // auto-confirm their email (they just proved ownership via Stripe).
@@ -91,7 +96,7 @@ export default async function PaymentCompletePage({
   // this exact step concurrently for the same email.
   const user = await getOrCreateAuthUser(db, email);
   if (!user) {
-    return failed("Couldn't provision your account. Please contact support.");
+    return paidButNotSignedIn(signInToReport);
   }
 
   // 3. Resolve the subscription + PM that own this PI, then run the
@@ -161,18 +166,16 @@ export default async function PaymentCompletePage({
   });
   const hashedToken = linkData?.properties?.hashed_token;
   if (!hashedToken) {
-    return failed("Couldn't sign you in automatically. Please log in via the email we sent.");
+    return paidButNotSignedIn(signInToReport);
   }
 
   // Preserve locale through the magic-link redirect. /auth/confirm itself
   // is not localized (middleware excludes /auth/*), but the `next` URL it
   // ultimately redirects to must include the /ro prefix so the report
   // page + popups render in the user's locale.
-  const locale = await getLocale();
-  const nextPath = localized(`/report/${analysisId}`, locale);
   redirect(
     `${baseUrl}/auth/confirm?token_hash=${encodeURIComponent(hashedToken)}` +
-      `&type=magiclink&next=${encodeURIComponent(nextPath)}`,
+      `&type=magiclink&next=${encodeURIComponent(reportPath)}`,
   );
 }
 
@@ -182,6 +185,29 @@ function failed(message: string) {
       <Card className="mt-10 text-center">
         <CardTitle className="mb-2">Hmm, something didn&apos;t line up.</CardTitle>
         <CardDescription>{message}</CardDescription>
+      </Card>
+    </FunnelShell>
+  );
+}
+
+/**
+ * Payment is confirmed but we couldn't sign the customer in here. Never a
+ * dead end: the report is still generated and emailed, and signing in with
+ * the checkout email opens it — no need to retake the test or pay again.
+ */
+function paidButNotSignedIn(signInHref: string) {
+  return (
+    <FunnelShell>
+      <Card className="mt-10 text-center">
+        <CardTitle className="mb-2">Payment received — your report is on its way</CardTitle>
+        <CardDescription className="mb-5">
+          We couldn&apos;t sign you in automatically. Your report is being generated and we&apos;ll
+          email you a link when it&apos;s ready. You can also sign in with the email you used at
+          checkout to open it. There&apos;s no need to take the test or pay again.
+        </CardDescription>
+        <Link href={signInHref}>
+          <Button size="block">Sign in to see my report →</Button>
+        </Link>
       </Card>
     </FunnelShell>
   );

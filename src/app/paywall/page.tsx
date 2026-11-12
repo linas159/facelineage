@@ -3,7 +3,8 @@ import { cookies } from "next/headers";
 import type Stripe from "stripe";
 import { FunnelShell } from "@/components/funnel-shell";
 import { PaywallClient, type SavedPaymentMethod } from "./paywall-client";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { getLocale, localized } from "@/lib/i18n/server";
 import { stripe } from "@/lib/stripe";
 import { ViewContentBeacon } from "@/lib/meta/view-content";
 
@@ -63,7 +64,15 @@ export default async function PaywallPage({
     }
   }
 
-  if (!analysisId) redirect("/start");
+  const locale = await getLocale();
+  if (!analysisId) redirect(localized("/start", locale));
+
+  // Already unlocked → never show the paywall (or a second charge) again.
+  // Covers stale tabs, the back button after paying, the pre-auth cookie
+  // still pointing at a paid analysis, and old links in emails.
+  if (await isAnalysisPaid(analysisId)) {
+    redirect(localized(`/report/${analysisId}`, locale));
+  }
 
   return (
     <FunnelShell>
@@ -75,6 +84,15 @@ export default async function PaywallPage({
       <PaywallClient analysisId={analysisId} savedPm={savedPm} />
     </FunnelShell>
   );
+}
+
+async function isAnalysisPaid(analysisId: string): Promise<boolean> {
+  const { data } = await createServiceClient()
+    .from("analyses")
+    .select("is_paid")
+    .eq("id", analysisId)
+    .maybeSingle();
+  return !!data?.is_paid;
 }
 
 function paymentMethodSummary(pm: Stripe.PaymentMethod): SavedPaymentMethod | null {

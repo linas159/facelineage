@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n/config";
+import { localized } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -23,15 +25,13 @@ export async function GET(req: NextRequest) {
   const next = url.searchParams.get("next") ?? "/dashboard";
 
   if (!tokenHash || !type) {
-    return NextResponse.redirect(new URL("/sign-up?error=missing_token", req.url));
+    return signInAgain(req, next, "missing_token");
   }
 
   const sb = await createClient();
   const { data, error } = await sb.auth.verifyOtp({ token_hash: tokenHash, type });
   if (error || !data.user) {
-    return NextResponse.redirect(
-      new URL(`/sign-up?error=${encodeURIComponent(error?.message ?? "verify_failed")}`, req.url),
-    );
+    return signInAgain(req, next, error?.message ?? "verify_failed");
   }
 
   // Claim any pre-auth analysis the user started before signing in.
@@ -44,4 +44,16 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.redirect(new URL(next, req.url));
+}
+
+/**
+ * Back to sign-in after a failed verify, keeping `next` (and its locale
+ * prefix) so a customer opening their report retries into that report
+ * instead of landing on the generic page that points at the quiz.
+ */
+function signInAgain(req: NextRequest, next: string, error: string): NextResponse {
+  const prefix = /^\/([a-z]{2})(?:\/|$)/.exec(next)?.[1];
+  const locale = isLocale(prefix) ? prefix : DEFAULT_LOCALE;
+  const qs = `?error=${encodeURIComponent(error)}&next=${encodeURIComponent(next)}`;
+  return NextResponse.redirect(new URL(localized(`/sign-up${qs}`, locale), req.url));
 }

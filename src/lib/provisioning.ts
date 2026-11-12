@@ -5,6 +5,7 @@ import {
   PLANS,
   isCurrency,
   formatPrice,
+  localeForCurrency,
   type PlanKey,
   type Currency,
 } from "@/lib/stripe";
@@ -15,6 +16,8 @@ import { capturePaymentEvidence } from "@/lib/prevent/evidence";
 import { sendReportReadyEmail } from "@/lib/email/send";
 import { formatChargeMoment } from "@/lib/email/templates";
 import { metaEventId, sendMetaEvent } from "@/lib/meta/capi";
+import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
+import { localized } from "@/lib/i18n/server";
 
 type DB = ReturnType<typeof createServiceClient>;
 
@@ -252,10 +255,15 @@ export async function provisionIntroPayment(opts: {
       ? (opts.pi.currency as Currency)
       : "usd";
     const recurringAmountCents = planMeta.recurring[currency];
+    const paidLocale = localeForCurrency(currency);
+    const reportLocale = isLocale(paidLocale) ? paidLocale : DEFAULT_LOCALE;
 
     try {
       await sendReportReadyEmail(opts.email, {
-        reportUrl: `${baseUrl}/report/${opts.analysisId}`,
+        // Same locale (→ same currency) the customer paid in. Opened on a
+        // device without a session, the report page sends them to sign-in
+        // with this report as `next`, never back into the funnel.
+        reportUrl: `${baseUrl}${localized(`/report/${opts.analysisId}`, reportLocale)}`,
         amountPaid: formatPrice(opts.pi.amount, currency, "en"),
         paymentDate: new Date().toLocaleDateString("en-US", {
           year: "numeric",
