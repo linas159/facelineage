@@ -18,9 +18,17 @@ type CookieToSet = { name: string; value: string; options?: CookieOptions };
  * On `/ro/...` requests we internally rewrite to the matching unprefixed
  * route and set an `x-locale` header that server components read via
  * `getLocale()`. The browser URL stays `/ro/...`.
+ *
+ * Visitors geolocated to the UK who land on an unprefixed funnel entry page
+ * are redirected to the `/uk` market (English, GBP prices). Post-purchase
+ * pages (account, report, dashboard, checkout…) are never redirected, so
+ * existing customers stay on the currency they bought in.
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  const geoRedirect = ukGeoRedirect(request);
+  if (geoRedirect) return geoRedirect;
 
   // 1. Decide locale + final rewrite URL.
   const matched = NON_DEFAULT.find(
@@ -65,6 +73,18 @@ export async function middleware(request: NextRequest) {
   await supabase.auth.getUser();
 
   return response;
+}
+
+const UK_ENTRY_PATH = /^\/(?:start|quiz\/[^/]+|onboarding\/[^/]+)?$/;
+
+function ukGeoRedirect(request: NextRequest): NextResponse | null {
+  if (request.method !== "GET" && request.method !== "HEAD") return null;
+  if (request.headers.get("x-vercel-ip-country") !== "GB") return null;
+  const { pathname } = request.nextUrl;
+  if (!UK_ENTRY_PATH.test(pathname)) return null;
+  const url = request.nextUrl.clone();
+  url.pathname = pathname === "/" ? "/uk" : `/uk${pathname}`;
+  return NextResponse.redirect(url, 307);
 }
 
 export const config = {

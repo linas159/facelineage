@@ -5,7 +5,7 @@ import { pl } from "./pl";
 import { ro } from "./ro";
 import { ua } from "./ua";
 
-const COPY: Record<Locale, EmailCopy> = { en, pl, ro, ua };
+const COPY: Record<Locale, EmailCopy> = { en, pl, ro, ua, uk: en };
 
 export function emailCopy(locale: Locale): EmailCopy {
   return COPY[locale];

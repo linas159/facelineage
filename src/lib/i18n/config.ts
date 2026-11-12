@@ -11,10 +11,15 @@
  * Routes and links update automatically via the helpers in `./server` and
  * `./client`; the AI writes reports in `AI_LANGUAGE_NAME[locale]`.
  *
+ * `uk` is the United Kingdom market, not a language: it's the English site
+ * (English dictionary/emails/report language, US-style formatting) with
+ * prices in GBP and slightly different legal price examples. Don't confuse it
+ * with Ukrainian, whose URL prefix is `ua` (HTML lang `uk`).
+ *
  * URL convention: the DEFAULT_LOCALE has no prefix (e.g. /quiz/1). All
  * other locales are accessed under `/{locale}/...` (e.g. /ro/quiz/1).
  */
-export const LOCALES = ["en", "ro", "pl", "ua"] as const;
+export const LOCALES = ["en", "ro", "pl", "ua", "uk"] as const;
 export type Locale = (typeof LOCALES)[number];
 
 export const DEFAULT_LOCALE: Locale = "en";
@@ -28,6 +33,7 @@ export const LOCALE_LABELS: Record<Locale, string> = {
   ro: "Română",
   pl: "Polski",
   ua: "Українська",
+  uk: "English (UK)",
 };
 
 /**
@@ -40,6 +46,7 @@ export const HTML_LANG: Record<Locale, string> = {
   ro: "ro",
   pl: "pl",
   ua: "uk",
+  uk: "en",
 };
 
 /** BCP-47 tag for `Intl` date/number formatting per locale. */
@@ -48,6 +55,7 @@ export const INTL_LOCALE: Record<Locale, string> = {
   ro: "ro-RO",
   pl: "pl-PL",
   ua: "uk-UA",
+  uk: "en-US",
 };
 
 /**
@@ -59,6 +67,7 @@ export const AI_LANGUAGE_NAME: Record<Locale, string> = {
   ro: "Romanian",
   pl: "Polish",
   ua: "Ukrainian",
+  uk: "English",
 };
 
 /** Format a date for display in `locale`, e.g. "12 listopada 2026". */

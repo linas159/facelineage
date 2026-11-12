@@ -759,6 +759,7 @@ const LANGUAGE_CHECK: Record<Locale, (text: string) => boolean> = {
   ro: (t) => /[ăâîșțşţ]/i.test(t),
   pl: (t) => /[ąćęłńóśźż]/i.test(t),
   ua: (t) => cyrillicShare(t) > 0.6,
+  uk: (t) => cyrillicShare(t) < 0.2,
 };
 
 function looksLikeLanguage(text: string, locale: Locale): boolean {

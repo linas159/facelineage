@@ -167,6 +167,7 @@ export async function POST(req: NextRequest) {
     ron: new Set(["card"]),
     pln: new Set(["card", "paypal", BLIK]),
     uah: new Set(["card"]),
+    gbp: new Set(["card", "paypal", "link"]),
   };
   const walletsMethods = Array.from(
     PM_CURRENCIES[currency] ?? new Set(["card"]),

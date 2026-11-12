@@ -11,6 +11,7 @@ const DICTIONARIES: Record<Locale, Dictionary> = {
   ro,
   pl,
   ua,
+  uk: en,
 };
 
 /**

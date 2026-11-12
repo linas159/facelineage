@@ -517,6 +517,7 @@ const INTL_LOCALE: Record<string, string> = {
   ro: "ro-RO",
   pl: "pl-PL",
   ua: "uk-UA",
+  uk: "en-US",
 };
 
 function formatMoney(cents: number, currency: string, locale = "en"): string {

@@ -4,12 +4,14 @@ import { legalEn } from "./en";
 import { legalPl } from "./pl";
 import { legalRo } from "./ro";
 import { legalUa } from "./ua";
+import { legalUk } from "./uk";
 
 const LEGAL: Record<Locale, LegalContent> = {
   en: legalEn,
   pl: legalPl,
   ro: legalRo,
   ua: legalUa,
+  uk: legalUk,
 };
 
 /** Returns the full set of legal documents for the given locale. */

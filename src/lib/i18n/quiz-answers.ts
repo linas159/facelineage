@@ -4,7 +4,7 @@ import { ro } from "./dictionaries/ro";
 import { pl } from "./dictionaries/pl";
 import { ua } from "./dictionaries/ua";
 
-const DICTIONARIES: Record<Locale, Dictionary> = { en, ro, pl, ua };
+const DICTIONARIES: Record<Locale, Dictionary> = { en, ro, pl, ua, uk: en };
 
 /** Saved quiz question key → its section in `dict.quiz`. */
 const QUESTION_DICT_KEY: Record<string, keyof Dictionary["quiz"]> = {
