@@ -2,10 +2,6 @@ import { FunnelShell } from "@/components/funnel-shell";
 import { CaptureView } from "./capture-view";
 import { getLocale, localized } from "@/lib/i18n/server";
 
-// The uploadPhoto server action starts report generation in `after()`, which
-// runs inside this page's invocation and needs the full budget.
-export const maxDuration = 300;
-
 /**
  * Photo capture — comes after the 6-question pre-quiz.
  * The CaptureView client component handles two layout states:

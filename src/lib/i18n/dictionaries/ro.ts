@@ -378,7 +378,7 @@ export const ro: Dictionary = {
 
   report: {
     composing: "Compunem raportul tău",
-    usuallyMinute: "De obicei durează un minut. Poți lăsa tab-ul deschis.",
+    usuallyMinute: "De obicei durează cam un minut. Lasă tab-ul deschis — raportul va apărea aici automat.",
     failedTitle: "Ceva nu a funcționat",
     failedBody: "Nu am putut finaliza raportul tău. Te rugăm să contactezi suportul — achiziția ta este înregistrată.",
     failedRetry: "Încearcă din nou",

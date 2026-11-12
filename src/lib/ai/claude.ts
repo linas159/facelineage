@@ -18,21 +18,21 @@ function client(): Anthropic {
 
 /**
  * Reading eye colour, hair depth and skin undertone off a selfie is a
- * *resolution* problem before it is a reasoning problem. Opus 5 accepts images
- * up to 2576px on the long edge and spends up to ~4784 tokens on one image;
- * Haiku 4.5 (which this used to run on) caps at 1568px and ~1600 tokens, which
- * compresses an iris down to a handful of tokens. That is why the model used to
- * guess eye and hair colour instead of reading it.
+ * *resolution* problem before it is a reasoning problem, so this needs a model
+ * with high-resolution vision (Haiku 4.5, which this used to run on, caps at
+ * 1568px and guessed eye and hair colour). Sonnet 5 reads the same detail as
+ * Opus 5 in about half the time — the customer waits on this call. (Sonnet 5.5
+ * was tried and often declines face-based ancestry estimates outright.)
  */
-const PRIMARY_MODEL = "claude-opus-5";
+const PRIMARY_MODEL = process.env.FL_ANALYSIS_MODEL ?? "claude-sonnet-5";
 
 /**
- * Last-resort rescue model. Reached only on the final attempt, after the
- * primary has already failed repeatedly — a sustained Opus outage or a request
- * the primary keeps declining. Sonnet 5 has the same high-resolution vision,
- * so a rescued report is still a good report, not a degraded one.
+ * Last-resort rescue model, reached only on the final attempt after the
+ * primary has failed repeatedly (an outage, or a request it keeps declining).
+ * Opus 5 has the same high-resolution vision, so a rescued report is still
+ * a good report.
  */
-const RESCUE_MODEL = "claude-sonnet-5";
+const RESCUE_MODEL = "claude-opus-5";
 
 /**
  * Server-side refusal fallback. Inferring ancestry from a face sits close
@@ -86,7 +86,7 @@ export type AnalysisResult = {
   uniqueness_score: number;
 };
 
-const SYSTEM_PROMPT = `You are the heritage analyst for Facelineage, a face-reading service that infers a user's most likely ancestral background from a single selfie. You will receive one photo and optional context (quiz answers, browser location) and must return a structured analysis using the report_analysis tool.
+const SYSTEM_PROMPT = `You are the heritage analyst for Facelineage, a face-reading service that infers a user's most likely ancestral background from a single selfie. You will receive one photo and optional context (quiz answers, browser location) and must return a structured analysis as JSON matching the report schema.
 
 # How to read the face
 
@@ -145,7 +145,7 @@ Defer to the face on phenotype; defer to the quiz on family stories. Example: fa
 
 # Hard rules for the output
 
-- Always respond by calling the report_analysis tool exactly once. Never reply with prose.
+- Respond with the report JSON only. Never reply with prose.
 - Region percentages MUST sum to 100 (±0.5). Country percentages within a region MUST sum to that region's percentage (±0.5).
 - Pick exactly 3 regions, each with 4-8 countries. Each region's color must be unique and one of: #7c5cff, #10b981, #fbbf24, #f97373, #ec4899.
 - Country lat/lng are real geographic centroids. iso2 codes are ISO-3166-1 alpha-2, lowercase.
@@ -162,101 +162,101 @@ Defer to the face on phenotype; defer to the quiz on family stories. Example: fa
 - Be respectful and culturally accurate when describing regions and customs.
 - If the photo is too poor quality to read confidently (severe blur, occlusion, extreme angle), still return a best-effort answer but lean toward broader regional groupings rather than specific countries.`;
 
-const ANALYSIS_TOOL = {
-  name: "report_analysis",
-  description: "Submit the user's full heritage report in one structured payload.",
-  // Strict mode makes the API constrain the tool input to this schema, so a
-  // response can no longer arrive with fields missing, renamed or stringified.
-  strict: true,
-  input_schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      conclusion: { type: "string" },
-      regions: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            key: { type: "string" },
-            name: { type: "string" },
-            pct: { type: "number" },
-            color: { type: "string" },
-            blurb: { type: "string" },
-            countries: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  name: { type: "string" },
-                  iso2: { type: "string" },
-                  pct: { type: "number" },
-                  lat: { type: "number" },
-                  lng: { type: "number" },
-                },
-                required: ["name", "iso2", "pct", "lat", "lng"],
-              },
-            },
-          },
-          required: ["key", "name", "pct", "color", "blurb", "countries"],
-        },
-      },
-      facial_traits: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            key: { type: "string" },
-            name: { type: "string" },
-            description: { type: "string" },
-            supporting_regions: { type: "array", items: { type: "string" } },
-          },
-          required: ["key", "name", "description", "supporting_regions"],
-        },
-      },
-      cultural_insights: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            key: { type: "string" },
-            name: { type: "string" },
-            description: { type: "string" },
-            region_keys: { type: "array", items: { type: "string" } },
-            image_prompt: { type: "string" },
-          },
-          required: ["key", "name", "description", "region_keys", "image_prompt"],
-        },
-      },
-      heritage_story: { type: "string" },
-      ancestor: {
+/**
+ * The report shape. Strict (every field required, no extra keys) because it is
+ * enforced by the API as a structured-output schema.
+ */
+const ANALYSIS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    conclusion: { type: "string" },
+    regions: {
+      type: "array",
+      minItems: 1,
+      items: {
         type: "object",
         additionalProperties: false,
         properties: {
+          key: { type: "string" },
           name: { type: "string" },
-          era: { type: "string" },
-          place: { type: "string" },
+          pct: { type: "number" },
+          color: { type: "string" },
+          blurb: { type: "string" },
+          countries: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                name: { type: "string" },
+                iso2: { type: "string" },
+                pct: { type: "number" },
+                lat: { type: "number" },
+                lng: { type: "number" },
+              },
+              required: ["name", "iso2", "pct", "lat", "lng"],
+            },
+          },
+        },
+        required: ["key", "name", "pct", "color", "blurb", "countries"],
+      },
+    },
+    facial_traits: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          key: { type: "string" },
+          name: { type: "string" },
           description: { type: "string" },
+          supporting_regions: { type: "array", items: { type: "string" } },
+        },
+        required: ["key", "name", "description", "supporting_regions"],
+      },
+    },
+    cultural_insights: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          key: { type: "string" },
+          name: { type: "string" },
+          description: { type: "string" },
+          region_keys: { type: "array", items: { type: "string" } },
           image_prompt: { type: "string" },
         },
-        required: ["name", "era", "place", "description", "image_prompt"],
+        required: ["key", "name", "description", "region_keys", "image_prompt"],
       },
-      uniqueness_score: { type: "integer" },
     },
-    required: [
-      "conclusion",
-      "regions",
-      "facial_traits",
-      "cultural_insights",
-      "heritage_story",
-      "ancestor",
-      "uniqueness_score",
-    ],
+    heritage_story: { type: "string" },
+    ancestor: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        name: { type: "string" },
+        era: { type: "string" },
+        place: { type: "string" },
+        description: { type: "string" },
+        image_prompt: { type: "string" },
+      },
+      required: ["name", "era", "place", "description", "image_prompt"],
+    },
+    uniqueness_score: { type: "integer" },
   },
+  required: [
+    "conclusion",
+    "regions",
+    "facial_traits",
+    "cultural_insights",
+    "heritage_story",
+    "ancestor",
+    "uniqueness_score",
+  ],
 } as const;
 
 export type AnalyzeContext = {
@@ -275,7 +275,7 @@ export type AnalyzeContext = {
  * a 2-paragraph story and the ancestor block) measures ~2.5k output tokens
  * on an average selfie and comfortably exceeds 4k on a verbose one. When the
  * budget is hit the API returns `stop_reason: "max_tokens"` and a *partially
- * parsed* tool_use input — the tail fields (`heritage_story`, `ancestor`,
+ * parsed* report — the tail fields (`heritage_story`, `ancestor`,
  * `uniqueness_score`) are simply absent, which is what used to surface as
  * "Cannot read properties of undefined (reading 'image_prompt')".
  *
@@ -368,7 +368,7 @@ function retryNudge(prev: RetryableAnalysisError | null): string {
     );
   }
   parts.push(
-    "Every property in the report_analysis schema is required. Fill in all of them — conclusion, regions (each with countries), facial_traits, cultural_insights, heritage_story, ancestor (including image_prompt) and uniqueness_score — before ending your response.",
+    "Every property in the report schema is required. Fill in all of them — conclusion, regions (each with countries), facial_traits, cultural_insights, heritage_story, ancestor (including image_prompt) and uniqueness_score — before ending your response.",
   );
   return parts.join(" ");
 }
@@ -439,7 +439,7 @@ async function analyzeFaceOnce(
   const contextBlock = formatContext(opts.context);
 
   // Repair instructions for a retry. This lives in the user turn (after the
-  // cached system + tool prefix) so prompt caching is unaffected.
+  // cached system prefix) so prompt caching is unaffected.
   const nudge = retryNudge(previousFailure);
 
   const model = modelForAttempt(attempt);
@@ -456,8 +456,15 @@ async function analyzeFaceOnce(
     // Reading fine detail off a face is exactly the work adaptive thinking
     // helps with; see ANALYSIS_EFFORT for why it runs at `medium`.
     thinking: { type: "adaptive" },
-    output_config: { effort: ANALYSIS_EFFORT },
-    // Cache the static system prompt + tool schema so re-runs are cheap.
+    // Structured outputs: the API constrains the response to the report
+    // schema, so it always arrives as complete, parseable JSON. This replaced
+    // a forced tool call, which newer models don't support and which
+    // occasionally came back with fields missing.
+    output_config: {
+      effort: ANALYSIS_EFFORT,
+      format: { type: "json_schema", schema: ANALYSIS_SCHEMA },
+    },
+    // Cache the static system prompt so re-runs are cheap.
     system: [
       {
         type: "text",
@@ -465,13 +472,6 @@ async function analyzeFaceOnce(
         cache_control: { type: "ephemeral" },
       },
     ],
-    tools: [
-      {
-        ...ANALYSIS_TOOL,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    tool_choice: { type: "tool", name: "report_analysis" },
     messages: [
       {
         role: "user",
@@ -487,7 +487,7 @@ async function analyzeFaceOnce(
           {
             type: "text",
             text:
-              `Analyze this selfie following the instructions in the system message, then call report_analysis with the structured result. The face is the primary input — the side context below is only a soft prior.\n\n${contextBlock}${nudge}`,
+              `Analyze this selfie following the instructions in the system message, then return the full report as JSON. The face is the primary input — the side context below is only a soft prior.\n\n${contextBlock}${nudge}`,
           },
         ],
       },
@@ -501,9 +501,7 @@ async function analyzeFaceOnce(
       `stop_reason=${resp.stop_reason} output_tokens=${resp.usage.output_tokens}/${MAX_OUTPUT_TOKENS}`,
   );
 
-  // A truncated response still carries a tool_use block, but its `input` is
-  // only partially parsed — trailing fields are silently missing. Catch it
-  // here rather than letting the caller trip over an undefined field.
+  // A truncated response is cut-off JSON with trailing fields missing.
   if (resp.stop_reason === "max_tokens") {
     throw new RetryableAnalysisError(
       `Response truncated at max_tokens (${resp.usage.output_tokens} output tokens) — result is incomplete`,
@@ -520,20 +518,26 @@ async function analyzeFaceOnce(
     );
   }
 
-  const toolUse = resp.content.find((b) => b.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use") {
+  const text = resp.content
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .join("")
+    .trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
     throw new RetryableAnalysisError(
-      `Claude did not return a tool_use block (stop_reason=${resp.stop_reason})`,
+      `Response was not valid JSON (stop_reason=${resp.stop_reason}): ${text.slice(0, 120)}`,
     );
   }
 
-  const input = normalizeToolInput(toolUse.input);
+  const input = normalizeReport(parsed);
   try {
     return validateAnalysis(input);
   } catch (err) {
     // Record what actually came back so a malformed shape can be diagnosed
     // from the logs instead of guessed at.
-    console.warn(`[claude] analyze attempt=${attempt} unusable tool input shape: ${describeShape(input)}`);
+    console.warn(`[claude] analyze attempt=${attempt} unusable report shape: ${describeShape(input)} text=${text.slice(0, 300)}`);
     throw err;
   }
 }
@@ -554,7 +558,7 @@ const REPORT_FIELDS = [
  * whole report wrapped in a single extra key (or sent as one JSON string).
  * Either one used to fail validation and cost a full ~90s re-generation.
  */
-function normalizeToolInput(raw: unknown): unknown {
+function normalizeReport(raw: unknown): unknown {
   let value = parseJsonString(raw);
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
 

@@ -259,8 +259,7 @@ export async function runMainPipeline(
       .update({
         generation_status: "ready",
         status: "ready",
-        // Payment is recorded by provisioning, never here: the report is
-        // pre-generated at selfie upload, before the customer has paid.
+        // Payment is recorded by provisioning (before this runs), never here.
         completed_at: new Date().toISOString(),
         ancestor: finalAncestor,
         // Surfaced only in logs/support tooling — a `ready` report never
@@ -287,12 +286,12 @@ export async function runMainPipeline(
 
 /**
  * Run the main pipeline and, if another invocation already holds the claim
- * (typically the pre-generation started at selfie upload), wait for that run
- * to finish instead of returning straight away. Returns the final
+ * (the webhook and /payment-complete both start it), wait for that run to
+ * finish instead of returning straight away. Returns the final
  * generation_status, so the caller knows whether the report is ready.
  *
- * A failed pre-generation is retried on the next loop pass, and a claim from a
- * killed invocation is reclaimed once it goes stale.
+ * A failed run is retried on the next loop pass, and a claim from a killed
+ * invocation is reclaimed once it goes stale.
  */
 export async function runMainPipelineAndWait(
   analysisId: string,

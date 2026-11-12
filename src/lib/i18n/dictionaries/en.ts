@@ -374,7 +374,7 @@ export const en = {
 
   report: {
     composing: "Composing your report",
-    usuallyMinute: "This usually takes a minute. Feel free to keep this tab open.",
+    usuallyMinute: "This usually takes about a minute. Keep this tab open — your report will appear here automatically.",
     failedTitle: "Something went wrong",
     failedBody: "We couldn't finish your report. Please contact support — your purchase is on file.",
     failedRetry: "Try again",

@@ -40,8 +40,7 @@ export default async function DashboardPage() {
     .select("id, created_at, generation_status, conclusion, regions, is_paid")
     .order("created_at", { ascending: false });
 
-  // Unpaid analyses can already hold a pre-generated report; show them as
-  // drafts so nothing from the report leaks before payment.
+  // Unpaid analyses are drafts; never show report content before payment.
   const reports = ((data ?? []) as Array<AnalysisRow & { is_paid: boolean | null }>).map(
     ({ is_paid, ...r }): AnalysisRow =>
       is_paid ? r : { ...r, generation_status: "idle", conclusion: null, regions: null },

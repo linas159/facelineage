@@ -206,8 +206,8 @@ export async function provisionIntroPayment(opts: {
       `[provisioning] firing pipeline analysis=${opts.analysisId}`,
     );
     try {
-      // Usually the report was pre-generated at selfie upload and is already
-      // ready (or nearly so) — wait for that run rather than skipping the email.
+      // If the other entry point (webhook vs /payment-complete) won the claim,
+      // wait for its run rather than skipping the email.
       await runMainPipelineAndWait(opts.analysisId);
     } catch (err) {
       console.error(

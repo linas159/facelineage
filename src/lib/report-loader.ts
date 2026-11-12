@@ -115,9 +115,8 @@ export async function loadReport(
   const isPaid = !!row.is_paid;
   const svc = createServiceClient();
 
-  // Reports are generated ahead of payment (from selfie upload), so an unpaid
-  // row may already hold a finished report. Until payment it is a draft:
-  // every view treats it as `idle`, which the report page sends to the paywall.
+  // An unpaid row is a draft: never expose report content before payment.
+  // Every view treats it as `idle`, which the report page sends to the paywall.
   if (!isPaid) {
     return { ...blank("idle"), isPaid: false };
   }

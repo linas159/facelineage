@@ -70,7 +70,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
             Your report is being composed.
           </h1>
           <p className="mx-auto mb-6 max-w-sm text-sm text-[var(--color-ink-soft)]">
-            Sit tight — we&apos;re reading your selfie, mapping your regions, and painting your ancestor portrait.
+            Sit tight — we&apos;re reading your selfie, mapping your regions, and painting your ancestor portrait. It usually takes about a minute.
           </p>
         </div>
         {/* Wrapper coordinates the spinner + upsell popups so the

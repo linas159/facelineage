@@ -362,7 +362,7 @@ export const pl: Dictionary = {
 
   report: {
     composing: "Tworzymy Twój raport",
-    usuallyMinute: "Zwykle zajmuje to minutę. Możesz zostawić tę kartę otwartą.",
+    usuallyMinute: "Zwykle trwa to około minuty. Nie zamykaj tej karty — raport pojawi się tutaj automatycznie.",
     failedTitle: "Coś poszło nie tak",
     failedBody: "Nie udało się dokończyć Twojego raportu. Skontaktuj się z pomocą — Twój zakup jest zapisany.",
     failedRetry: "Spróbuj ponownie",
