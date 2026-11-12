@@ -38,6 +38,22 @@ export function createServiceClient() {
   return createSupaClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } },
+    {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { fetch: uncachedFetch },
+    },
   );
 }
+
+/**
+ * Inside a server-component render, Next.js memoizes identical GET fetches
+ * that carry no `signal`, so polling a row/user returned the first (stale)
+ * result forever — /payment-complete never saw the user the webhook had
+ * just created. A fresh signal per request opts out of that memoization.
+ */
+const uncachedFetch: typeof fetch = (input, init) =>
+  fetch(input, {
+    ...init,
+    cache: "no-store",
+    signal: init?.signal ?? new AbortController().signal,
+  });
