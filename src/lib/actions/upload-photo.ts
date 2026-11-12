@@ -4,8 +4,10 @@ import { randomUUID } from "crypto";
 import { cookies } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 import { getLocale, localized } from "@/lib/i18n/server";
+import { runMainPipeline } from "@/lib/ai/pipeline";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const ACCEPTED = ["image/jpeg", "image/png", "image/webp", "image/heic"];
@@ -86,6 +88,21 @@ export async function uploadPhoto(formData: FormData) {
       sameSite: "lax",
     });
   }
+
+  // Start generating the report now, while the customer works through the
+  // email, paywall and checkout steps (typically 60-90s). By the time payment
+  // completes the report is ready or nearly so, instead of only starting then.
+  // The report stays locked until payment: report-loader and the dashboard
+  // gate every view on is_paid, and provisioning waits for this run to finish.
+  const analysisId = analysis.id;
+  after(async () => {
+    try {
+      await runMainPipeline(analysisId);
+    } catch (err) {
+      // Not fatal: provisioning retries a failed run once the customer pays.
+      console.error(`[upload-photo] pre-generation failed analysis=${analysisId}:`, err);
+    }
+  });
 
   const locale = await getLocale();
   redirect(localized(`/analyzing?id=${analysis.id}`, locale));

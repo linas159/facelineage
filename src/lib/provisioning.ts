@@ -10,7 +10,7 @@ import {
   type Currency,
 } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
-import { runMainPipeline } from "@/lib/ai/pipeline";
+import { runMainPipelineAndWait } from "@/lib/ai/pipeline";
 import { recordPurchase } from "@/lib/purchases";
 import { capturePaymentEvidence } from "@/lib/prevent/evidence";
 import { sendReportReadyEmail } from "@/lib/email/send";
@@ -206,7 +206,9 @@ export async function provisionIntroPayment(opts: {
       `[provisioning] firing pipeline analysis=${opts.analysisId}`,
     );
     try {
-      await runMainPipeline(opts.analysisId);
+      // Usually the report was pre-generated at selfie upload and is already
+      // ready (or nearly so) — wait for that run rather than skipping the email.
+      await runMainPipelineAndWait(opts.analysisId);
     } catch (err) {
       console.error(
         `[provisioning] pipeline failed analysis=${opts.analysisId}:`,

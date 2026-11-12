@@ -37,10 +37,15 @@ export default async function DashboardPage() {
 
   const { data } = await sb
     .from("analyses")
-    .select("id, created_at, generation_status, conclusion, regions")
+    .select("id, created_at, generation_status, conclusion, regions, is_paid")
     .order("created_at", { ascending: false });
 
-  const reports = (data ?? []) as AnalysisRow[];
+  // Unpaid analyses can already hold a pre-generated report; show them as
+  // drafts so nothing from the report leaks before payment.
+  const reports = ((data ?? []) as Array<AnalysisRow & { is_paid: boolean | null }>).map(
+    ({ is_paid, ...r }): AnalysisRow =>
+      is_paid ? r : { ...r, generation_status: "idle", conclusion: null, regions: null },
+  );
   const latestReady = reports.find((r) => r.generation_status === "ready");
 
   // Pull every upsell artifact owned by this user (across all their analyses).

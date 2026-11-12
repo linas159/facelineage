@@ -12,11 +12,10 @@ const GENERATED_BUCKET = "generated";
 /**
  * A `running` claim older than this is assumed dead — the serverless
  * invocation that made it was killed, timed out, or crashed without ever
- * reaching the catch block. Longer than the worst realistic run (Claude with
- * retries + portrait with retries ≈ 3 min), short enough that a waiting
- * customer is not stuck for long.
+ * reaching the catch block. Every caller runs under Vercel's 300s ceiling, so
+ * a claim this old cannot still be alive.
  */
-const STALE_RUNNING_MS = 8 * 60 * 1000;
+const STALE_RUNNING_MS = 330 * 1000;
 
 /**
  * Cap on automatic attempts, so a genuinely broken analysis (corrupt photo,
@@ -260,7 +259,8 @@ export async function runMainPipeline(
       .update({
         generation_status: "ready",
         status: "ready",
-        is_paid: true,
+        // Payment is recorded by provisioning, never here: the report is
+        // pre-generated at selfie upload, before the customer has paid.
         completed_at: new Date().toISOString(),
         ancestor: finalAncestor,
         // Surfaced only in logs/support tooling — a `ready` report never
@@ -282,6 +282,53 @@ export async function runMainPipeline(
       .update({ generation_status: "failed", generation_error: message })
       .eq("id", analysisId);
     throw err;
+  }
+}
+
+/**
+ * Run the main pipeline and, if another invocation already holds the claim
+ * (typically the pre-generation started at selfie upload), wait for that run
+ * to finish instead of returning straight away. Returns the final
+ * generation_status, so the caller knows whether the report is ready.
+ *
+ * A failed pre-generation is retried on the next loop pass, and a claim from a
+ * killed invocation is reclaimed once it goes stale.
+ */
+export async function runMainPipelineAndWait(
+  analysisId: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<string | null> {
+  const deadline = Date.now() + (opts.timeoutMs ?? 240_000);
+  const db = createServiceClient();
+  let lastError: unknown = null;
+  let othersRunIsLive = false;
+  for (;;) {
+    // While another invocation's claim is live, just poll; re-invoking would
+    // only log "already running" every pass.
+    if (!othersRunIsLive) {
+      try {
+        await runMainPipeline(analysisId);
+        lastError = null;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    const { data } = await db
+      .from("analyses")
+      .select("generation_status, generation_attempts, generation_started_at")
+      .eq("id", analysisId)
+      .maybeSingle();
+    const status = data?.generation_status ?? null;
+    const startedAt = data?.generation_started_at ? Date.parse(data.generation_started_at) : 0;
+    othersRunIsLive =
+      status === "running" && !!startedAt && Date.now() - startedAt < STALE_RUNNING_MS;
+    const exhausted = (data?.generation_attempts ?? 0) >= MAX_PIPELINE_ATTEMPTS;
+    if (status === "ready" || exhausted || Date.now() > deadline) {
+      if (status !== "ready" && lastError) throw lastError;
+      return status;
+    }
+    if (status === "failed" && lastError) throw lastError;
+    await new Promise((r) => setTimeout(r, 2000));
   }
 }
 

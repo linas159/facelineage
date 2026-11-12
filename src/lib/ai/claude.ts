@@ -165,14 +165,19 @@ Defer to the face on phenotype; defer to the quiz on family stories. Example: fa
 const ANALYSIS_TOOL = {
   name: "report_analysis",
   description: "Submit the user's full heritage report in one structured payload.",
+  // Strict mode makes the API constrain the tool input to this schema, so a
+  // response can no longer arrive with fields missing, renamed or stringified.
+  strict: true,
   input_schema: {
     type: "object",
+    additionalProperties: false,
     properties: {
       conclusion: { type: "string" },
       regions: {
         type: "array",
         items: {
           type: "object",
+          additionalProperties: false,
           properties: {
             key: { type: "string" },
             name: { type: "string" },
@@ -183,6 +188,7 @@ const ANALYSIS_TOOL = {
               type: "array",
               items: {
                 type: "object",
+                additionalProperties: false,
                 properties: {
                   name: { type: "string" },
                   iso2: { type: "string" },
@@ -201,6 +207,7 @@ const ANALYSIS_TOOL = {
         type: "array",
         items: {
           type: "object",
+          additionalProperties: false,
           properties: {
             key: { type: "string" },
             name: { type: "string" },
@@ -214,6 +221,7 @@ const ANALYSIS_TOOL = {
         type: "array",
         items: {
           type: "object",
+          additionalProperties: false,
           properties: {
             key: { type: "string" },
             name: { type: "string" },
@@ -227,6 +235,7 @@ const ANALYSIS_TOOL = {
       heritage_story: { type: "string" },
       ancestor: {
         type: "object",
+        additionalProperties: false,
         properties: {
           name: { type: "string" },
           era: { type: "string" },
@@ -280,6 +289,21 @@ const MAX_OUTPUT_TOKENS = 32000;
 
 /** How many times to re-run a truncated / malformed / transient-failure call. */
 const MAX_ANALYSIS_ATTEMPTS = 4;
+
+/**
+ * Thinking effort for the main analysis. The customer waits on this call, and
+ * output length (not thinking) dominates its duration: measured on real
+ * selfies, `medium` finishes in ~60-75s with the same level of detail that
+ * `high` produced in ~75-110s.
+ */
+const ANALYSIS_EFFORT = "medium" as const;
+
+/**
+ * No new attempt starts after this much time has passed. Callers run under a
+ * 300s Vercel ceiling; an attempt that can't finish inside it would only be
+ * killed mid-flight and leave the row stuck in `running`.
+ */
+const ANALYSIS_RETRY_BUDGET_MS = 170_000;
 
 /**
  * Which model a given attempt runs on.
@@ -365,8 +389,13 @@ export async function analyzeFace(opts: {
   let lastError: unknown;
   let lastAnalysisError: RetryableAnalysisError | null = null;
   let attempt = 1;
+  const startedAt = Date.now();
 
   while (attempt <= MAX_ANALYSIS_ATTEMPTS) {
+    if (attempt > 1 && Date.now() - startedAt > ANALYSIS_RETRY_BUDGET_MS) {
+      console.error(`[claude] analyze retry budget spent after ${attempt - 1} attempt(s)`);
+      break;
+    }
     try {
       return await analyzeFaceOnce(opts, attempt, lastAnalysisError);
     } catch (err) {
@@ -425,10 +454,9 @@ async function analyzeFaceOnce(
     betas: [FALLBACK_BETA],
     fallbacks: "default",
     // Reading fine detail off a face is exactly the work adaptive thinking
-    // helps with. `high` is the quality sweet spot that still finishes well
-    // inside the 300s Vercel ceiling the callers run under.
+    // helps with; see ANALYSIS_EFFORT for why it runs at `medium`.
     thinking: { type: "adaptive" },
-    output_config: { effort: "high" },
+    output_config: { effort: ANALYSIS_EFFORT },
     // Cache the static system prompt + tool schema so re-runs are cheap.
     system: [
       {
@@ -499,7 +527,77 @@ async function analyzeFaceOnce(
     );
   }
 
-  return validateAnalysis(toolUse.input);
+  const input = normalizeToolInput(toolUse.input);
+  try {
+    return validateAnalysis(input);
+  } catch (err) {
+    // Record what actually came back so a malformed shape can be diagnosed
+    // from the logs instead of guessed at.
+    console.warn(`[claude] analyze attempt=${attempt} unusable tool input shape: ${describeShape(input)}`);
+    throw err;
+  }
+}
+
+const REPORT_FIELDS = [
+  "conclusion",
+  "regions",
+  "facial_traits",
+  "cultural_insights",
+  "heritage_story",
+  "ancestor",
+  "uniqueness_score",
+] as const;
+
+/**
+ * Repair the two malformed shapes the model has produced in production
+ * despite a valid schema: nested fields sent as JSON-encoded strings, and the
+ * whole report wrapped in a single extra key (or sent as one JSON string).
+ * Either one used to fail validation and cost a full ~90s re-generation.
+ */
+function normalizeToolInput(raw: unknown): unknown {
+  let value = parseJsonString(raw);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+
+  let obj = value as Record<string, unknown>;
+  if (!REPORT_FIELDS.some((f) => f in obj)) {
+    const wrapped = Object.values(obj)
+      .map(parseJsonString)
+      .find(
+        (v) =>
+          v && typeof v === "object" && !Array.isArray(v) &&
+          REPORT_FIELDS.some((f) => f in (v as Record<string, unknown>)),
+      );
+    if (wrapped) obj = wrapped as Record<string, unknown>;
+  }
+
+  value = { ...obj };
+  for (const field of ["regions", "facial_traits", "cultural_insights", "ancestor"] as const) {
+    (value as Record<string, unknown>)[field] = parseJsonString(obj[field]);
+  }
+  const score = obj.uniqueness_score;
+  if (typeof score === "string" && score.trim() !== "" && Number.isFinite(Number(score))) {
+    (value as Record<string, unknown>).uniqueness_score = Number(score);
+  }
+  return value;
+}
+
+function parseJsonString(v: unknown): unknown {
+  if (typeof v !== "string") return v;
+  const t = v.trim();
+  if (!(t.startsWith("{") || t.startsWith("["))) return v;
+  try {
+    return JSON.parse(t);
+  } catch {
+    return v;
+  }
+}
+
+function describeShape(v: unknown): string {
+  if (v === null || typeof v !== "object") return `${typeof v}(${String(v).slice(0, 120)})`;
+  if (Array.isArray(v)) return `array[${v.length}]`;
+  return `{${Object.entries(v as Record<string, unknown>)
+    .map(([k, x]) => `${k}:${Array.isArray(x) ? `array[${x.length}]` : typeof x}`)
+    .join(", ")}}`;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -31,12 +31,12 @@ export async function POST(
   const sb = await createClient();
   const { data: row } = await sb
     .from("analyses")
-    .select("id, generation_status, regions")
+    .select("id, generation_status, regions, is_paid")
     .eq("id", id)
     .maybeSingle();
 
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  if (row.generation_status !== "ready") {
+  if (row.generation_status !== "ready" || !row.is_paid) {
     return NextResponse.json(
       { error: "This report isn't finished yet" },
       { status: 409 },
