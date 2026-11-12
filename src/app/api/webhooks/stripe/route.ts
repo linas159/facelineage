@@ -22,6 +22,7 @@ import { sendSubscriptionCanceledEmail } from "@/lib/email/send";
 import { formatChargeMoment, perInterval } from "@/lib/email/templates";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
 import { billingLocale } from "@/lib/email/copy";
+import { maybeHalveAfterInsufficientFunds } from "@/lib/billing/half-retry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +40,9 @@ export const maxDuration = 300;
  *      ↳ kind=upsell      → record purchase, fire upsell pipeline
  *  - customer.subscription.updated/created/deleted → mirror state, and email
  *    the customer a cancellation confirmation when they cancel it themselves
- *  - invoice.payment_failed → past_due
+ *  - invoice.payment_failed → past_due; after 2× insufficient_funds on a
+ *    renewal, credit half the invoice so the next retry charges 50%
+ *    (see @/lib/billing/half-retry)
  *  - charge.refunded → mirror refund onto the purchase (dispute-prevention
  *    lookups read it back; see @/lib/prevent)
  *  - charge.dispute.* → mirror the dispute into our own ledger, stamped with
@@ -153,6 +156,13 @@ export async function POST(req: NextRequest) {
             .from("subscriptions")
             .update({ status: "past_due" })
             .eq("stripe_subscription_id", invoice.subscription as string);
+        }
+        try {
+          await maybeHalveAfterInsufficientFunds(invoice);
+        } catch (err) {
+          // Never fail the webhook over a courtesy discount — Stripe would
+          // redeliver and the past_due mirror above has already happened.
+          console.error(`[half-retry] invoice=${invoice.id} failed:`, err);
         }
         break;
       }
