@@ -70,7 +70,26 @@ export async function provisionIntroPayment(opts: {
   }
 
   // 2. Persist subscription row (PK = user_id, default upsert is correct).
+  // The row holds one subscription per user. If it already tracks a
+  // different running subscription, that one keeps billing untracked in the
+  // DB. Cancellations still reach it (the webhook cascades by email), but
+  // flag it so duplicates are visible.
   try {
+    const { data: existing } = await db
+      .from("subscriptions")
+      .select("stripe_subscription_id, status")
+      .eq("user_id", opts.userId)
+      .maybeSingle();
+    if (
+      existing?.stripe_subscription_id &&
+      existing.stripe_subscription_id !== opts.subscription.id &&
+      (existing.status === "active" || existing.status === "trialing")
+    ) {
+      console.warn(
+        `[provisioning] user=${opts.userId} gets a second running subscription: ` +
+          `${opts.subscription.id} replaces tracked ${existing.stripe_subscription_id} (${existing.status})`,
+      );
+    }
     await db.from("subscriptions").upsert({
       user_id: opts.userId,
       stripe_customer_id: customerId,
@@ -164,32 +183,8 @@ export async function provisionIntroPayment(opts: {
     console.error("[provisioning] sibling cancel failed:", err);
   }
 
-  // 5. Mark analysis paid + owned (idempotent, safe to repeat).
-  await db
-    .from("analyses")
-    .update({
-      user_id: opts.userId,
-      is_paid: true,
-    })
-    .eq("id", opts.analysisId);
-
-  // Queue generation — but ONLY when there is nothing finished to protect.
-  //
-  // This function is deliberately called from several entry points (the
-  // `invoice.paid` webhook, /payment-complete, /api/intro-charge) and Stripe
-  // retries webhooks, so it runs many times per customer — including on every
-  // subscription renewal. An unconditional reset to `queued` therefore takes a
-  // finished report away from the customer: the report page renders the
-  // "composing…" spinner and report-loader returns a blank report for any
-  // status other than `ready`. That is what "report generation stopped
-  // working" looks like from the outside, for a report that already exists.
-  await db
-    .from("analyses")
-    .update({ generation_status: "queued" })
-    .eq("id", opts.analysisId)
-    // Null-safe allowlist: `.not(...in...)` would skip NULL rows, since
-    // NOT (NULL IN (...)) is NULL rather than true.
-    .or("generation_status.is.null,generation_status.in.(idle,queued,failed)");
+  // 5. Mark analysis paid + owned, queue generation.
+  await markAnalysisPaid(db, opts.analysisId, opts.userId);
 
   // 6. Fire the AI pipeline + the report-ready email post-response. Both
   // are individually deduped — runMainPipeline skips if status is
@@ -301,6 +296,57 @@ export async function provisionIntroPayment(opts: {
         .from("analyses")
         .update({ report_email_sent_at: null })
         .eq("id", opts.analysisId);
+    }
+  });
+}
+
+/**
+ * Mark an analysis paid + owned and queue its generation. Idempotent.
+ *
+ * Generation is queued ONLY when there is nothing finished to protect.
+ * provisionIntroPayment runs from several entry points (the `invoice.paid`
+ * webhook, /payment-complete, /api/intro-charge) and Stripe retries webhooks,
+ * so it runs many times per customer — including on every subscription
+ * renewal. An unconditional reset to `queued` would take a finished report
+ * away from the customer: the report page renders the "composing…" spinner
+ * and report-loader returns a blank report for any status other than `ready`.
+ */
+async function markAnalysisPaid(db: DB, analysisId: string, userId: string): Promise<void> {
+  await db
+    .from("analyses")
+    .update({ user_id: userId, is_paid: true })
+    .eq("id", analysisId);
+
+  await db
+    .from("analyses")
+    .update({ generation_status: "queued" })
+    .eq("id", analysisId)
+    // Null-safe allowlist: `.not(...in...)` would skip NULL rows, since
+    // NOT (NULL IN (...)) is NULL rather than true.
+    .or("generation_status.is.null,generation_status.in.(idle,queued,failed)");
+}
+
+/**
+ * Unlock an extra analysis for a customer whose running subscription already
+ * covers it — no charge, no new subscription, no receipt email (they are on
+ * the page and watch it generate). Caller must verify ownership and the live
+ * subscription first.
+ */
+export async function unlockIncludedAnalysis(opts: {
+  analysisId: string;
+  userId: string;
+  db?: DB;
+}): Promise<void> {
+  const db = opts.db ?? createServiceClient();
+  await markAnalysisPaid(db, opts.analysisId, opts.userId);
+  console.log(
+    `[provisioning] included-in-subscription unlock analysis=${opts.analysisId} user=${opts.userId}`,
+  );
+  after(async () => {
+    try {
+      await runMainPipelineAndWait(opts.analysisId);
+    } catch (err) {
+      console.error(`[provisioning] pipeline failed analysis=${opts.analysisId}:`, err);
     }
   });
 }

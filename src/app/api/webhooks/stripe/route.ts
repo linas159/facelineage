@@ -17,6 +17,7 @@ import { recordPurchase } from "@/lib/purchases";
 import { capturePaymentEvidence, captureRefund } from "@/lib/prevent/evidence";
 import { recordDispute } from "@/lib/prevent/disputes";
 import { provisionIntroPayment } from "@/lib/provisioning";
+import { findLiveSubscriptions } from "@/lib/subscription-access";
 import { getOrCreateAuthUser } from "@/lib/auth-user";
 import { sendSubscriptionCanceledEmail } from "@/lib/email/send";
 import { formatChargeMoment, perInterval } from "@/lib/email/templates";
@@ -104,6 +105,7 @@ export async function POST(req: NextRequest) {
             db,
             endsAt: sub.cancel_at ?? sub.current_period_end ?? null,
           });
+          await cascadeCancellation(sub, db);
         }
         break;
       }
@@ -117,6 +119,7 @@ export async function POST(req: NextRequest) {
         // scheduled earlier also lands here when it finally lapses — already
         // confirmed then, and the send-once claim inside keeps it to one email.
         await confirmCancellation({ sub, db, endsAt: null });
+        await cascadeCancellation(sub, db);
         break;
       }
       case "charge.refunded": {
@@ -572,6 +575,80 @@ async function confirmCancellation(opts: {
     return;
   }
   console.log(`[cancel-email] confirmed cancellation to=${email} sub=${sub.id} endsAt=${endsAt ?? "(now)"}`);
+}
+
+/**
+ * Metadata flag for support/admin cancellations that must NOT cascade, e.g.
+ * removing a duplicate subscription while keeping the customer's other one.
+ * Set it on the subscription before cancelling it.
+ */
+const NO_CASCADE_METADATA = "cancel_cascade";
+
+/**
+ * A customer who cancels expects to stop paying, full stop. One person can
+ * own several running subscriptions (a repeat purchase under a fresh Stripe
+ * customer, which the single-row `subscriptions` table and the Portal never
+ * show them), so carry their cancellation over to every other running one:
+ * scheduled → scheduled at period end, immediate → immediate.
+ *
+ * Converges without loops: the cascaded events re-enter here, but siblings
+ * that are already canceling or canceled are skipped. Only the tracked
+ * subscription has a `subscriptions` row, so confirmCancellation still sends
+ * one email.
+ */
+async function cascadeCancellation(
+  sub: Stripe.Subscription,
+  db: ReturnType<typeof createServiceClient>,
+) {
+  if (sub.cancellation_details?.reason !== "cancellation_requested") return;
+  if (sub.metadata?.[NO_CASCADE_METADATA] === "skip") {
+    console.log(`[cancel-cascade] sub=${sub.id} marked ${NO_CASCADE_METADATA}=skip — not cascading`);
+    return;
+  }
+  const immediate = sub.status === "canceled";
+  // A scheduled cancellation that is only now lapsing already cascaded when
+  // it was scheduled; cascading again would kill subs reactivated or bought since.
+  if (immediate && (sub.cancel_at_period_end || sub.cancel_at != null)) return;
+
+  try {
+    // Only a subscription the customer actually paid for. Provisioning
+    // cancels the unpaid dual-checkout sibling itself (also
+    // `cancellation_requested`), and that must not touch the paid one.
+    const paid = await stripe.invoices.list({ subscription: sub.id, status: "paid", limit: 1 });
+    if (paid.data.length === 0) return;
+
+    const customer = await customerOf(sub);
+    const { data: row } = await db
+      .from("subscriptions")
+      .select("user_id")
+      .eq("stripe_subscription_id", sub.id)
+      .maybeSingle();
+    const userId =
+      row?.user_id ?? sub.metadata?.supabase_user_id ?? customer?.metadata?.supabase_user_id ?? null;
+    const email = customer?.email ?? (await profileEmail(db, userId));
+    if (!userId && !email) return;
+
+    const requestedAt = sub.canceled_at ?? Math.floor(Date.now() / 1000);
+    const siblings = (await findLiveSubscriptions({ userId, email, db })).filter(
+      (s) => s.id !== sub.id && !isCanceling(s) && s.created <= requestedAt,
+    );
+    for (const sibling of siblings) {
+      try {
+        if (immediate) {
+          await stripe.subscriptions.cancel(sibling.id);
+        } else {
+          await stripe.subscriptions.update(sibling.id, { cancel_at_period_end: true });
+        }
+        console.log(
+          `[cancel-cascade] ${immediate ? "canceled" : "scheduled cancel of"} sub=${sibling.id} after customer canceled sub=${sub.id}`,
+        );
+      } catch (err) {
+        console.error(`[cancel-cascade] failed on sub=${sibling.id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error(`[cancel-cascade] sub=${sub.id}:`, err);
+  }
 }
 
 /** "$24.99/week" for the subscription's own price + currency, if resolvable. */

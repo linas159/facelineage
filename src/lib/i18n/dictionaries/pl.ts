@@ -444,6 +444,8 @@ export const pl: Dictionary = {
   },
 
   dashboard: {
+    locked: "Zablokowany",
+    includedChip: "W subskrypcji",
     eyebrow: "Moja biblioteka",
     title: "Twoje raporty",
     emptyTitle: "Nie masz jeszcze raportów",

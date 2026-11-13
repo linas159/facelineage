@@ -449,6 +449,8 @@ export const ua: Dictionary = {
   },
 
   dashboard: {
+    locked: "Заблоковано",
+    includedChip: "У підписці",
     eyebrow: "Моя бібліотека",
     title: "Твої звіти",
     emptyTitle: "Звітів поки немає",

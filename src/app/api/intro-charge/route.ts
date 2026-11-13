@@ -11,6 +11,7 @@ import {
 } from "@/lib/stripe";
 import { isLocale, DEFAULT_LOCALE } from "@/lib/i18n/config";
 import { createClient } from "@/lib/supabase/server";
+import { hasLiveSubscription } from "@/lib/subscription-access";
 
 /**
  * POST /api/intro-charge
@@ -66,6 +67,15 @@ export async function POST(req: NextRequest) {
   }
   if (analysis.is_paid) {
     return NextResponse.json({ error: "Already paid", alreadyPaid: true }, { status: 409 });
+  }
+
+  // A running subscription already covers new analyses — never start a
+  // second one (stale paywall tab). The paywall re-renders as a free unlock.
+  if (await hasLiveSubscription({ userId: user.id, email: user.email })) {
+    return NextResponse.json(
+      { error: "Included in subscription", includedInSubscription: true },
+      { status: 409 },
+    );
   }
 
   // Resolve the Stripe customer + saved default payment method.

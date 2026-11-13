@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import type Stripe from "stripe";
 import { FunnelShell } from "@/components/funnel-shell";
 import { PaywallClient, type SavedPaymentMethod } from "./paywall-client";
+import { unlockIfSubscriber } from "@/lib/subscription-access";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getLocale, localized } from "@/lib/i18n/server";
 import { stripe } from "@/lib/stripe";
@@ -71,6 +72,13 @@ export default async function PaywallPage({
   // Covers stale tabs, the back button after paying, the pre-auth cookie
   // still pointing at a paid analysis, and old links in emails.
   if (await isAnalysisPaid(analysisId)) {
+    redirect(localized(`/report/${analysisId}`, locale));
+  }
+
+  // Signed-in customer with a running subscription → the analysis is
+  // included: unlock it and skip the paywall. Charging again would start a
+  // second subscription. (Covers old drafts opened from the dashboard.)
+  if (user && (await unlockIfSubscriber({ analysisId, userId: user.id, email: user.email }))) {
     redirect(localized(`/report/${analysisId}`, locale));
   }
 

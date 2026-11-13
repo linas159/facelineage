@@ -460,6 +460,8 @@ export const ro: Dictionary = {
   },
 
   dashboard: {
+    locked: "Blocat",
+    includedChip: "Inclus",
     eyebrow: "Biblioteca mea",
     title: "Rapoartele tale",
     emptyTitle: "Încă nu ai rapoarte",

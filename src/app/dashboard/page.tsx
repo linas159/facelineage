@@ -6,6 +6,7 @@ import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { UpsellSections, type UpsellId } from "@/components/upsell-sections";
 import { UpsellDisplay } from "@/components/report/upsell-display";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { hasLiveSubscription } from "@/lib/subscription-access";
 import { getDictionary, getLocale, localized } from "@/lib/i18n/server";
 import { DEFAULT_LOCALE, formatDate, isLocale } from "@/lib/i18n/config";
 import type { UpsellArtifact, UpsellSku } from "@/lib/report-loader";
@@ -20,6 +21,8 @@ type AnalysisRow = {
   regions: Array<{ name?: string; pct?: number; color?: string }> | null;
   locale: string | null;
 };
+
+type ReportCard = AnalysisRow & { paid: boolean };
 
 const SKU_TO_UI_ID: Record<UpsellSku, UpsellId> = {
   upsell_v2_parents: "parents",
@@ -45,11 +48,20 @@ export default async function DashboardPage() {
     .order("created_at", { ascending: false });
 
   // Unpaid analyses are drafts; never show report content before payment.
-  const reports = ((data ?? []) as Array<AnalysisRow & { is_paid: boolean | null }>).map(
-    ({ is_paid, ...r }): AnalysisRow =>
-      is_paid ? r : { ...r, generation_status: "idle", conclusion: null, regions: null },
-  );
+  // Paid reports first so a customer finds the report they bought, not the
+  // newest locked draft (which led to a customer paying twice).
+  const reports = ((data ?? []) as Array<AnalysisRow & { is_paid: boolean | null }>)
+    .map(({ is_paid, ...r }): ReportCard =>
+      is_paid
+        ? { ...r, paid: true }
+        : { ...r, paid: false, generation_status: "idle", conclusion: null, regions: null },
+    )
+    .sort((a, b) => Number(b.paid) - Number(a.paid));
   const latestReady = reports.find((r) => r.generation_status === "ready");
+  // Locked drafts are free to unlock for a running subscription.
+  const draftsIncluded =
+    reports.some((r) => !r.paid) &&
+    (await hasLiveSubscription({ userId: user.id, email: user.email }));
 
   // Pull every upsell artifact owned by this user (across all their analyses).
   // RLS goes through purchases → user; service client is simpler and safe
@@ -158,6 +170,10 @@ export default async function DashboardPage() {
                         <Chip color="yellow">{t.inProgress}</Chip>
                       ) : r.generation_status === "failed" ? (
                         <Chip color="coral">{t.failed}</Chip>
+                      ) : !r.paid ? (
+                        <Chip color={draftsIncluded ? "green" : "default"}>
+                          {draftsIncluded ? t.includedChip : t.locked}
+                        </Chip>
                       ) : null}
                     </div>
                   </Card>

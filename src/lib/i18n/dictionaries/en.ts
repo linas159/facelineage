@@ -462,6 +462,8 @@ export const en = {
   },
 
   dashboard: {
+    locked: "Locked",
+    includedChip: "Included",
     eyebrow: "My library",
     title: "Your reports",
     emptyTitle: "No reports yet",

@@ -80,12 +80,21 @@ export function AnalyzingClient({ analysisId }: { analysisId?: string }) {
           // Final phase done — collect email before paywall so we know
           // who's buying before they hit Stripe (simplifies provisioning
           // and rules out post-pay "couldn't link account" failures).
-          setTimeout(() => router.push(localizeHref("/email", locale)), 700);
+          setTimeout(
+            () =>
+              router.push(
+                localizeHref(
+                  analysisId ? `/email?analysis=${encodeURIComponent(analysisId)}` : "/email",
+                  locale,
+                ),
+              ),
+            700,
+          );
         }
       }
     }, TICK_MS);
     return () => clearInterval(interval);
-  }, [phase, paused, router, PHASE_LABELS.length, locale]);
+  }, [phase, paused, router, PHASE_LABELS.length, locale, analysisId]);
 
   function answerQuestion() {
     setQuestionIdx(null);

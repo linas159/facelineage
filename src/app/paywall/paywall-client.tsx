@@ -184,9 +184,15 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
         subscriptionId?: string;
         error?: string;
         alreadyPaid?: boolean;
+        includedInSubscription?: boolean;
       };
       if (data.alreadyPaid) {
         router.push(localizeHref(`/report/${analysisId}`, locale));
+        return;
+      }
+      if (data.includedInSubscription) {
+        // Server re-renders this page as the free subscriber unlock.
+        router.refresh();
         return;
       }
       if (data.requiresCheckout) {
