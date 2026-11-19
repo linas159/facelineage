@@ -73,6 +73,9 @@ const LOCALE_TO_CURRENCY: Record<string, Currency> = {
   pl: "pln",
   ua: "uah",
   uk: "gbp",
+  fr: "eur",
+  it: "eur",
+  es: "eur",
 };
 
 export function pickCurrency(locale: string | null | undefined): Currency {
@@ -84,12 +87,13 @@ export function pickCurrency(locale: string | null | undefined): Currency {
  * Reverse of `pickCurrency`: the app locale a charge in `currency` was made
  * from. Used where only the Stripe object is at hand (e.g. building the
  * report link in the receipt email) so the link lands on the same locale —
- * and therefore the same currency — the customer bought in.
+ * and therefore the same currency — the customer bought in. Currencies shared
+ * by several locales (EUR: fr/it/es) can't name one, so they return "en".
  */
 export function localeForCurrency(currency: string | null | undefined): string {
   const c = currency?.toLowerCase();
-  const match = Object.entries(LOCALE_TO_CURRENCY).find(([, cur]) => cur === c);
-  return match?.[0] ?? "en";
+  const matches = Object.entries(LOCALE_TO_CURRENCY).filter(([, cur]) => cur === c);
+  return matches.length === 1 ? matches[0][0] : "en";
 }
 
 /**
@@ -208,8 +212,8 @@ export const PLANS = {
     recurringInterval: "month" as const,
     recurringPeriod: "month",
     sellable: true,
-    intro: { usd: 195, eur: 195, ron: 700, pln: 799, uah: 7900, gbp: 149 } satisfies Amounts,
-    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199, uah: 199900, gbp: 3799 } satisfies Amounts,
+    intro: { usd: 249, eur: 249, ron: 900, pln: 900, uah: 12900, gbp: 199 } satisfies Amounts,
+    recurring: { usd: 4900, eur: 4900, ron: 19900, pln: 19900, uah: 249900, gbp: 3900 } satisfies Amounts,
     original: { usd: 995, eur: 995, ron: 3900, pln: 3999, uah: 39900, gbp: 799 } satisfies Amounts,
   },
   sub_intro_7d_m: {
@@ -219,8 +223,8 @@ export const PLANS = {
     recurringInterval: "month" as const,
     recurringPeriod: "month",
     sellable: true,
-    intro: { usd: 395, eur: 395, ron: 1500, pln: 1599, uah: 16900, gbp: 299 } satisfies Amounts,
-    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199, uah: 199900, gbp: 3799 } satisfies Amounts,
+    intro: { usd: 499, eur: 499, ron: 1900, pln: 1800, uah: 25900, gbp: 399 } satisfies Amounts,
+    recurring: { usd: 4900, eur: 4900, ron: 19900, pln: 19900, uah: 249900, gbp: 3900 } satisfies Amounts,
     original: { usd: 1299, eur: 1299, ron: 4900, pln: 5199, uah: 54900, gbp: 999 } satisfies Amounts,
   },
   sub_intro_1m: {
@@ -230,8 +234,8 @@ export const PLANS = {
     recurringInterval: "month" as const,
     recurringPeriod: "month",
     sellable: true,
-    intro: { usd: 1395, eur: 1395, ron: 5500, pln: 5599, uah: 59900, gbp: 1099 } satisfies Amounts,
-    recurring: { usd: 4799, eur: 4799, ron: 18900, pln: 19199, uah: 199900, gbp: 3799 } satisfies Amounts,
+    intro: { usd: 1799, eur: 1799, ron: 6900, pln: 6500, uah: 94900, gbp: 1399 } satisfies Amounts,
+    recurring: { usd: 4900, eur: 4900, ron: 19900, pln: 19900, uah: 249900, gbp: 3900 } satisfies Amounts,
     original: { usd: 3999, eur: 3999, ron: 15900, pln: 15999, uah: 169900, gbp: 3099 } satisfies Amounts,
   },
 } as const;
@@ -250,6 +254,32 @@ export const LEGACY_PLAN_REPLACEMENT: Partial<Record<PlanKey, PlanKey>> = {
   sub_intro_3d: "sub_intro_3d_m",
   sub_intro_7d: "sub_intro_7d_m",
 };
+
+/**
+ * Monthly renewal amounts before the Nov 2026 price change. Subscribers who
+ * started earlier stay on the old Stripe Price (`fl_recur_month_mc_v2`), so
+ * anything describing *their* renewal must use these, not `PLANS.recurring`.
+ * Prefer the amount on the actual Stripe Price where one is at hand.
+ */
+const LEGACY_MONTHLY_RECURRING: Amounts = {
+  usd: 4799, eur: 4799, ron: 18900, pln: 19199, uah: 199900, gbp: 3799,
+};
+/** When the `fl_recur_month_mc_v3` Price went live for new checkouts. */
+export const MONTHLY_PRICE_V3_SINCE = Date.parse("2026-11-19T13:36:00Z");
+
+/** Recurring amount for a subscription to `plan` that started at `startedAt`. */
+export function recurringAmountFor(
+  plan: PlanKey,
+  currency: Currency,
+  startedAt: string | number | Date | null | undefined,
+): number {
+  const meta = PLANS[plan];
+  const started = startedAt == null ? NaN : new Date(startedAt).getTime();
+  if (meta.recurringInterval === "month" && started < MONTHLY_PRICE_V3_SINCE) {
+    return LEGACY_MONTHLY_RECURRING[currency];
+  }
+  return meta.recurring[currency];
+}
 
 /** Strikethrough "was" prices for upsells — UI-only marketing, not in Stripe. */
 export const UPSELL_ORIGINAL: Record<PriceSku, Amounts | null> = {

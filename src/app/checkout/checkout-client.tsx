@@ -178,7 +178,7 @@ export function CheckoutClient(props: CheckoutClientProps) {
       ? t.paywall[PERIOD_KEY_BY_PLAN[props.plan]] ?? PLANS[props.plan].introPeriod
       : null;
 
-  // "After 7 days, you'll be charged $47.99 for a month of access." Only for
+  // "After 7 days, you'll be charged $49 for a month of access." Only for
   // monthly-renewing intro plans; the amount mirrors the Stripe recurring price.
   const recurringPlan =
     props.mode === "intro" && props.plan && PLANS[props.plan].recurringInterval === "month"
@@ -518,6 +518,9 @@ const INTL_LOCALE: Record<string, string> = {
   pl: "pl-PL",
   ua: "uk-UA",
   uk: "en-US",
+  fr: "fr-FR",
+  it: "it-IT",
+  es: "es-ES",
 };
 
 function formatMoney(cents: number, currency: string, locale = "en"): string {

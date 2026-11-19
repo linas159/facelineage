@@ -3,7 +3,17 @@ import { FunnelShell } from "@/components/funnel-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle, Chip } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import { PLANS, formatPrice, pickCurrency } from "@/lib/stripe";
+import {
+  PLANS,
+  formatPrice,
+  isCurrency,
+  pickCurrency,
+  priceAmountFor,
+  recurringAmountFor,
+  stripe,
+  type Currency,
+  type PlanKey,
+} from "@/lib/stripe";
 import { fmt, getLocale, getDictionary, localized } from "@/lib/i18n/server";
 import { formatDate } from "@/lib/i18n/config";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
@@ -29,7 +39,7 @@ export default async function AccountPage() {
 
   const { data: sub } = await sb
     .from("subscriptions")
-    .select("status, product_sku, current_period_end, cancel_at")
+    .select("status, product_sku, current_period_end, cancel_at, stripe_subscription_id, created_at")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -40,10 +50,12 @@ export default async function AccountPage() {
     : null;
   const dict = await getDictionary();
   const t = dict.account;
-  const currency = pickCurrency(locale);
   const planLabel = planMeta ? dict.paywall[planMeta.labelKey] : null;
-  const recurringDisplay = planMeta
-    ? formatPrice(planMeta.recurring[currency], currency, locale)
+  const recurring = planMeta && sub
+    ? await subscriptionRecurring(sub, pickCurrency(locale))
+    : null;
+  const recurringDisplay = recurring
+    ? formatPrice(recurring.cents, recurring.currency, locale)
     : null;
 
   return (
@@ -123,4 +135,32 @@ export default async function AccountPage() {
       </div>
     </FunnelShell>
   );
+}
+
+/**
+ * What this subscriber actually renews at. Read from their Stripe Price,
+ * since earlier subscribers are grandfathered on older prices; falls back to
+ * the catalog amount for their start date.
+ */
+async function subscriptionRecurring(
+  sub: { product_sku: string | null; stripe_subscription_id: string | null; created_at: string | null },
+  fallbackCurrency: Currency,
+): Promise<{ cents: number; currency: Currency }> {
+  if (stripe && sub.stripe_subscription_id) {
+    try {
+      const s = await stripe.subscriptions.retrieve(sub.stripe_subscription_id);
+      const priceId = s.items.data[0]?.price.id;
+      if (priceId && isCurrency(s.currency)) {
+        const price = await stripe.prices.retrieve(priceId, { expand: ["currency_options"] });
+        const cents = priceAmountFor(price, s.currency);
+        if (cents) return { cents, currency: s.currency };
+      }
+    } catch {
+      // Fall through to the catalog amount.
+    }
+  }
+  return {
+    cents: recurringAmountFor(sub.product_sku as PlanKey, fallbackCurrency, sub.created_at),
+    currency: fallbackCurrency,
+  };
 }

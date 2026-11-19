@@ -23,7 +23,7 @@ import { metaEventId, readRequestContext, sendMetaEvent } from "@/lib/meta/capi"
  *   - subCard    → PaymentElement (card only, no tabs).
  *
  * Each subscription has `trial_period_days` for the intro window and an
- * `add_invoice_items` line for the $1.95 intro fee, with
+ * `add_invoice_items` line for the intro fee (e.g. $2.49), with
  * `payment_behavior: "default_incomplete"` so the first invoice's
  * PaymentIntent must be paid to activate. After payment, Stripe auto-charges
  * the recurring price after the trial ends (PayPal billing agreement or

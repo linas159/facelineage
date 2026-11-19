@@ -4,8 +4,8 @@ import type { LegalBlock, LegalContent, LegalDoc } from "./types";
 /** USD price examples in the English legal copy → their GBP counterparts
  *  (see `PLANS` in `src/lib/stripe.ts`). */
 const GBP_EXAMPLES: ReadonlyArray<[string, string]> = [
-  ["$1.95", "£1.49"],
-  ["$47.99", "£37.99"],
+  ["$2.49", "£1.99"],
+  ["$49", "£39"],
 ];
 
 function toGbp(text: string): string {

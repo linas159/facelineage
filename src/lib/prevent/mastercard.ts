@@ -1,6 +1,6 @@
 import "server-only";
 import { MERCHANT, POLICY, productInfo } from "@/lib/prevent/config";
-import { PLANS, isCurrency, type Currency, type PlanKey } from "@/lib/stripe";
+import { PLANS, isCurrency, recurringAmountFor, type Currency, type PlanKey } from "@/lib/stripe";
 import {
   centsToString,
   currencyCode,
@@ -194,6 +194,7 @@ function recurringBlock(
   const started = purchase.authorized_at ?? purchase.created_at;
   const status = lifecycleStatus(sub?.status);
   const isTrialing = sub?.status === "trialing";
+  const recurringCents = recurringAmountFor(sku, currency, started);
 
   return {
     trialPeriod: true,
@@ -213,7 +214,7 @@ function recurringBlock(
     subscriptionStartDateTime: isoSeconds(sub?.created_at ?? started),
     subscriptionCancellationDateTime: isoSeconds(sub?.canceled_at),
     subscriptionExpirationDateTime: isoSeconds(sub?.cancel_at),
-    subscriptionPrice: centsToString(plan.recurring[currency]),
+    subscriptionPrice: centsToString(recurringCents),
     subscriptionInterval: 1,
     subscriptionIntervalUnit: plan.recurringInterval === "week" ? "Week" : "Month",
     subscriptionStatus: status,
@@ -222,7 +223,7 @@ function recurringBlock(
     // Nothing is charged again until the intro period ends, so the trial end
     // and the first full-price payment are the same moment.
     subscriptionNextBillingDateTime: isoSeconds(sub?.current_period_end),
-    subscriptionFirstPayment: centsToString(plan.recurring[currency]),
+    subscriptionFirstPayment: centsToString(recurringCents),
     numberOfHistoricSuccessfulPayments: ctx.purchaseCount,
     cancellationPenalty: false,
     cancellationPenaltyDescription: fit(POLICY.cancellationRecap, 500),

@@ -47,10 +47,12 @@ const SUBSCRIPTION_TIERS = [
   },
   {
     name: "Facelineage Monthly",
-    recurringLookup: "fl_recur_month_mc_v2",
+    // v3 (Nov 2026): new customers renew at $49 / €49. Subscribers on v2
+    // ($47.99) keep their price — see LEGACY_MONTHLY_RECURRING in lib/stripe.ts.
+    recurringLookup: "fl_recur_month_mc_v3",
     recurringInterval: "month",
-    recurringNickname: "$47.99 / month (multi-currency)",
-    amounts: { usd: 4799, eur: 4799, ron: 18900, pln: 19199, uah: 199900, gbp: 3799 },
+    recurringNickname: "$49 / month (multi-currency)",
+    amounts: { usd: 4900, eur: 4900, ron: 19900, pln: 19900, uah: 249900, gbp: 3900 },
   },
 ];
 

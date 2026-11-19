@@ -16,10 +16,13 @@
  * prices in GBP and slightly different legal price examples. Don't confuse it
  * with Ukrainian, whose URL prefix is `ua` (HTML lang `uk`).
  *
+ * `fr`, `it` and `es` (France, Italy, Spain) are full translations that all
+ * check out in EUR.
+ *
  * URL convention: the DEFAULT_LOCALE has no prefix (e.g. /quiz/1). All
  * other locales are accessed under `/{locale}/...` (e.g. /ro/quiz/1).
  */
-export const LOCALES = ["en", "ro", "pl", "ua", "uk"] as const;
+export const LOCALES = ["en", "ro", "pl", "ua", "uk", "fr", "it", "es"] as const;
 export type Locale = (typeof LOCALES)[number];
 
 export const DEFAULT_LOCALE: Locale = "en";
@@ -34,6 +37,9 @@ export const LOCALE_LABELS: Record<Locale, string> = {
   pl: "Polski",
   ua: "Українська",
   uk: "English (UK)",
+  fr: "Français",
+  it: "Italiano",
+  es: "Español",
 };
 
 /**
@@ -47,6 +53,9 @@ export const HTML_LANG: Record<Locale, string> = {
   pl: "pl",
   ua: "uk",
   uk: "en",
+  fr: "fr",
+  it: "it",
+  es: "es",
 };
 
 /** BCP-47 tag for `Intl` date/number formatting per locale. */
@@ -56,6 +65,9 @@ export const INTL_LOCALE: Record<Locale, string> = {
   pl: "pl-PL",
   ua: "uk-UA",
   uk: "en-US",
+  fr: "fr-FR",
+  it: "it-IT",
+  es: "es-ES",
 };
 
 /**
@@ -68,6 +80,9 @@ export const AI_LANGUAGE_NAME: Record<Locale, string> = {
   pl: "Polish",
   ua: "Ukrainian",
   uk: "English",
+  fr: "French",
+  it: "Italian",
+  es: "Spanish",
 };
 
 /** Format a date for display in `locale`, e.g. "12 listopada 2026". */

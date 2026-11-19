@@ -5,6 +5,9 @@ import { en, type Dictionary } from "./dictionaries/en";
 import { ro } from "./dictionaries/ro";
 import { pl } from "./dictionaries/pl";
 import { ua } from "./dictionaries/ua";
+import { fr } from "./dictionaries/fr";
+import { it } from "./dictionaries/it";
+import { es } from "./dictionaries/es";
 
 const DICTIONARIES: Record<Locale, Dictionary> = {
   en,
@@ -12,6 +15,9 @@ const DICTIONARIES: Record<Locale, Dictionary> = {
   pl,
   ua,
   uk: en,
+  fr,
+  it,
+  es,
 };
 
 /**

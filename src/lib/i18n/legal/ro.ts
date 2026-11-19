@@ -180,7 +180,7 @@ export const legalRo: LegalContent = {
       {
         kind: "ul",
         items: [
-          "Majoritatea planurilor încep cu o perioadă introductivă plătită (de exemplu, 7 RON pentru 3 zile) și apoi se **reînnoiesc automat** la prețul standard (de exemplu, 189 RON/lună) până la anulare. Prețurile exacte, perioada introductivă și condițiile de reînnoire îți sunt afișate înainte de a plăti.",
+          "Majoritatea planurilor încep cu o perioadă introductivă plătită (de exemplu, 9 RON pentru 3 zile) și apoi se **reînnoiesc automat** la prețul standard (de exemplu, 199 RON/lună) până la anulare. Prețurile exacte, perioada introductivă și condițiile de reînnoire îți sunt afișate înainte de a plăti.",
           "Taxele de reînnoire sunt percepute automat din metoda de plată salvată. Înainte de fiecare reînnoire îți trimitem un memento prin e-mail.",
           "Poți anula oricând din [pagina contului](/account). Anularea oprește taxele viitoare și produce efecte la sfârșitul perioadei plătite curente; păstrezi accesul până atunci.",
           "Achizițiile suplimentare (de ex. Oglinda Originii, Viitorul Partener) sunt taxe unice, facturate imediat.",
@@ -366,7 +366,7 @@ export const legalRo: LegalContent = {
       {
         kind: "ul",
         items: [
-          "Plata introductivă (de ex. 7 RON pentru 3 zile) acoperă perioada introductivă. Anulează înainte să se termine pentru a evita perceperea prețului recurent.",
+          "Plata introductivă (de ex. 9 RON pentru 3 zile) acoperă perioada introductivă. Anulează înainte să se termine pentru a evita perceperea prețului recurent.",
           "Poți anula oricând din [pagina contului](/account). Anularea oprește taxele viitoare; accesul continuă până la sfârșitul perioadei curente.",
           "Dacă uiți să anulezi și ești taxat pentru o reînnoire pe care nu ai folosit-o, contactează-ne în termen de 7 zile de la reînnoire și îți vom rambursa ultima taxă.",
         ],

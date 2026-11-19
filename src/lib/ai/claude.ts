@@ -751,7 +751,7 @@ function validateAnalysis(raw: unknown): AnalysisResult {
 /**
  * Cheap check that prose is in the requested language: script share for
  * Cyrillic, characteristic diacritics for Latin-script languages (two
- * paragraphs of real Polish or Romanian never lack them). Catches the model
+ * paragraphs of real Polish, Romanian, French or Spanish never lack them). Catches the model
  * slipping back into English; it is not a language identifier.
  */
 const LANGUAGE_CHECK: Record<Locale, (text: string) => boolean> = {
@@ -760,6 +760,11 @@ const LANGUAGE_CHECK: Record<Locale, (text: string) => boolean> = {
   pl: (t) => /[ąćęłńóśźż]/i.test(t),
   ua: (t) => cyrillicShare(t) > 0.6,
   uk: (t) => cyrillicShare(t) < 0.2,
+  fr: (t) => /[éèêàçùûœ]/i.test(t),
+  // Italian accents are rarer than French/Spanish ones; also accept its most
+  // common function words, which English prose never contains.
+  it: (t) => /[àèéìòù]/i.test(t) || /\b(?:della|degli|delle|nella|sono|anche)\b/i.test(t),
+  es: (t) => /[ñáéíóú¿¡]/i.test(t),
 };
 
 function looksLikeLanguage(text: string, locale: Locale): boolean {

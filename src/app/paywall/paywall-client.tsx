@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, Chip } from "@/components/ui/card";
@@ -34,8 +34,8 @@ type PlanStatic = {
 };
 
 const PLAN_STATICS: PlanStatic[] = [
-  { key: "sub_intro_3d_m", labelKey: "planLabel3d", periodKey: "period3d", recurringPattern: "recurringMonthly", badged: false },
-  { key: "sub_intro_7d_m", labelKey: "planLabel7d", periodKey: "period7d", recurringPattern: "recurringMonthly", badged: true  },
+  { key: "sub_intro_3d_m", labelKey: "planLabel3d", periodKey: "period3d", recurringPattern: "recurringMonthly", badged: true  },
+  { key: "sub_intro_7d_m", labelKey: "planLabel7d", periodKey: "period7d", recurringPattern: "recurringMonthly", badged: false },
   { key: "sub_intro_1m", labelKey: "planLabel1m" , periodKey: "period1m", recurringPattern: "recurringMonthly", badged: false },
 ];
 
@@ -79,11 +79,15 @@ interface PaywallClientProps {
 export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
   const router = useRouter();
   const { t, locale } = useI18n();
-  const [selected, setSelected] = useState<PlanKey>("sub_intro_7d_m");
+  const [selected, setSelected] = useState<PlanKey>("sub_intro_3d_m");
   const [busy, setBusy] = useState(false);
   const [chargeError, setChargeError] = useState<string | null>(null);
   const [selfieSrc, setSelfieSrc] = useState<string | null>(null);
   const [remainingMs, setRemainingMs] = useState(OFFER_WINDOW_MS);
+  const [showSticky, setShowSticky] = useState(false);
+  const heroCtaRef = useRef<HTMLDivElement>(null);
+  const pricingCtaRef = useRef<HTMLDivElement>(null);
+  const finalCtaRef = useRef<HTMLDivElement>(null);
 
   const currency = pickCurrency(locale);
   const plans: PlanDisplay[] = useMemo(
@@ -155,6 +159,33 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
+  }, []);
+
+  // Sticky checkout bar: shown once the hero CTA has scrolled away, hidden
+  // while the pricing or final CTA is on screen (they already offer it).
+  useEffect(() => {
+    const hero = heroCtaRef.current;
+    const inline = [pricingCtaRef.current, finalCtaRef.current].filter(
+      (el): el is HTMLDivElement => !!el,
+    );
+    if (!hero || typeof IntersectionObserver === "undefined") return;
+    let heroPassed = false;
+    const inlineVisible = new Set<Element>();
+    const observer = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.target === hero) {
+          heroPassed = !e.isIntersecting && e.boundingClientRect.top < 0;
+        } else if (e.isIntersecting) {
+          inlineVisible.add(e.target);
+        } else {
+          inlineVisible.delete(e.target);
+        }
+      }
+      setShowSticky(heroPassed && inlineVisible.size === 0);
+    });
+    observer.observe(hero);
+    inline.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
   }, []);
 
   function scrollToPricing() {
@@ -238,7 +269,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
     }
   }
 
-  function startCheckout() {
+  function startCheckout(source: "inline" | "sticky" = "inline") {
     setBusy(true);
     // Browser Pixel — pairs with the CAPI InitiateCheckout fired by
     // /api/checkout (same deterministic event_id) for dedup.
@@ -249,6 +280,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
       currency,
       intro_cents: introCents,
       has_saved_pm: !!savedPm,
+      source,
     });
     fbqTrack(
       "InitiateCheckout",
@@ -421,9 +453,11 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
             {t.paywall.heroStatGenerations}
           </span>
         </div>
-        <Button size="block" onClick={scrollToPricing} className="mx-auto max-w-xs">
-          {fmt(t.paywall.unlockCtaFromPerDay, { price: lowestPerDay })}
-        </Button>
+        <div ref={heroCtaRef}>
+          <Button size="block" onClick={scrollToPricing} className="mx-auto max-w-xs">
+            {fmt(t.paywall.unlockCtaFromPerDay, { price: lowestPerDay })}
+          </Button>
+        </div>
       </div>
 
       {/* Blurred teaser */}
@@ -582,6 +616,7 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
       {renderPlansBlock()}
 
       {/* CTA — one-tap charge for returning users with a saved card */}
+      <div ref={pricingCtaRef}>
       {savedPm ? (
         <>
           <Button
@@ -608,10 +643,11 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
           )}
         </>
       ) : (
-        <Button size="block" onClick={startCheckout} disabled={busy} className="mb-3">
+        <Button size="block" onClick={() => startCheckout()} disabled={busy} className="mb-3">
           {busy ? t.paywall.loading : fmt(t.paywall.unlockMyReportPriced, { price: planStatic.intro })}
         </Button>
       )}
+      </div>
 
       <PaymentTrustStrip heading={t.paywall.payTrustHeading} />
 
@@ -709,15 +745,53 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
       </div>
 
       {/* Final reassurance CTA */}
+      <div ref={finalCtaRef}>
       <Card className="mt-6 bg-[var(--color-orange-pale)] text-center !p-5">
         <h3 className="mb-1 font-display text-xl">{t.paywall.finalCtaTitle}</h3>
         <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
           {t.paywall.finalCtaSub}
         </p>
-        <Button size="block" onClick={startCheckout} disabled={busy}>
+        <Button size="block" onClick={() => startCheckout()} disabled={busy}>
           {busy ? t.paywall.loading : fmt(t.paywall.finalCtaButton, { price: planStatic.intro })}
         </Button>
       </Card>
+      </div>
+
+      {/* Sticky checkout bar — always goes straight to /checkout with the
+          selected plan (even for saved-card users). */}
+      <div
+        aria-hidden={!showSticky}
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-line)] bg-white/95 shadow-[0_-4px_16px_rgba(0,0,0,0.08)] backdrop-blur transition-transform duration-300",
+          showSticky ? "translate-y-0" : "pointer-events-none translate-y-full",
+        )}
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        <div className="mx-auto flex max-w-md items-center gap-3 px-5 py-3">
+          <div className="min-w-0 flex-shrink-0">
+            <div className="truncate text-xs font-bold text-[var(--color-ink)]">
+              {t.paywall[planStatic.labelKey]}
+            </div>
+            <div className="flex items-baseline gap-1.5 tabular">
+              <span className="text-[11px] text-[var(--color-ink-muted)] line-through">
+                {planStatic.original}
+              </span>
+              <span className="font-display text-base font-bold text-[var(--color-orange)]">
+                {planStatic.intro}
+              </span>
+            </div>
+          </div>
+          <Button
+            size="block"
+            onClick={() => startCheckout("sticky")}
+            disabled={busy || !showSticky}
+            tabIndex={showSticky ? 0 : -1}
+            className="flex-1"
+          >
+            {busy ? t.paywall.loading : fmt(t.paywall.finalCtaButton, { price: planStatic.intro })}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

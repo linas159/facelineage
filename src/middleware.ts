@@ -19,15 +19,16 @@ type CookieToSet = { name: string; value: string; options?: CookieOptions };
  * route and set an `x-locale` header that server components read via
  * `getLocale()`. The browser URL stays `/ro/...`.
  *
- * Visitors geolocated to the UK who land on an unprefixed funnel entry page
- * are redirected to the `/uk` market (English, GBP prices). Post-purchase
+ * Visitors geolocated to a market country (GB, FR, IT, ES — see
+ * `GEO_MARKETS`) who land on an unprefixed funnel entry page are redirected
+ * to that market's locale (e.g. `/uk`, `/fr`). Post-purchase
  * pages (account, report, dashboard, checkout…) are never redirected, so
  * existing customers stay on the currency they bought in.
  */
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  const geoRedirect = ukGeoRedirect(request);
+  const geoRedirect = marketGeoRedirect(request);
   if (geoRedirect) return geoRedirect;
 
   // 1. Decide locale + final rewrite URL.
@@ -75,15 +76,25 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
-const UK_ENTRY_PATH = /^\/(?:start|quiz\/[^/]+|onboarding\/[^/]+)?$/;
+const MARKET_ENTRY_PATH = /^\/(?:start|quiz\/[^/]+|onboarding\/[^/]+)?$/;
 
-function ukGeoRedirect(request: NextRequest): NextResponse | null {
+/** Vercel geo country (ISO 3166-1 alpha-2) → market locale. */
+const GEO_MARKETS: Readonly<Record<string, Locale>> = {
+  GB: "uk",
+  FR: "fr",
+  IT: "it",
+  ES: "es",
+};
+
+function marketGeoRedirect(request: NextRequest): NextResponse | null {
   if (request.method !== "GET" && request.method !== "HEAD") return null;
-  if (request.headers.get("x-vercel-ip-country") !== "GB") return null;
+  const country = request.headers.get("x-vercel-ip-country");
+  const market = country ? GEO_MARKETS[country] : undefined;
+  if (!market) return null;
   const { pathname } = request.nextUrl;
-  if (!UK_ENTRY_PATH.test(pathname)) return null;
+  if (!MARKET_ENTRY_PATH.test(pathname)) return null;
   const url = request.nextUrl.clone();
-  url.pathname = pathname === "/" ? "/uk" : `/uk${pathname}`;
+  url.pathname = pathname === "/" ? `/${market}` : `/${market}${pathname}`;
   return NextResponse.redirect(url, 307);
 }
 
