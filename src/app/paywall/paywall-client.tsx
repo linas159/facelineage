@@ -323,13 +323,14 @@ export function PaywallClient({ analysisId, savedPm }: PaywallClientProps) {
               }}
               className={cn(
                 "relative w-full rounded-[var(--radius-card)] bg-white p-4 text-left shadow-[var(--shadow-card)] transition-all",
+                p.badged && "mt-5",
                 active
                   ? "ring-3 ring-[var(--color-orange)] -translate-y-0.5"
                   : "ring-1 ring-[var(--color-line)] opacity-90 hover:opacity-100",
               )}
             >
               {p.badged && (
-                <span className="absolute -top-2.5 left-4 rounded-full bg-[var(--color-orange)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                <span className="absolute -top-2.5 left-4 whitespace-nowrap rounded-full bg-[var(--color-orange)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
                   {fmt(t.paywall.planBadgeMostPopularSave, { percent: p.savingsPct })}
                 </span>
               )}
