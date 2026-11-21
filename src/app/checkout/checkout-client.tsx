@@ -248,9 +248,6 @@ export function CheckoutClient(props: CheckoutClientProps) {
               {formatMoney(init.amount, init.currency, locale)}
             </span>
           </div>
-          {renewalNote && (
-            <p className="mt-1 text-xs text-[var(--color-ink-muted)]">{renewalNote}</p>
-          )}
         </Card>
       )}
 
@@ -333,7 +330,13 @@ export function CheckoutClient(props: CheckoutClientProps) {
 
       {!init && !error && <CheckoutLoader />}
 
-      <p className="mt-6 text-center text-[10px] leading-relaxed text-[var(--color-ink-muted)]">
+      {renewalNote && (
+        <p className="mt-6 text-center text-xs text-[var(--color-ink-muted)]">{renewalNote}</p>
+      )}
+
+      <p
+        className={`${renewalNote ? "mt-2" : "mt-6"} text-center text-[10px] leading-relaxed text-[var(--color-ink-muted)]`}
+      >
         {t.checkout.stripeNote}
       </p>
     </div>
@@ -528,6 +531,7 @@ function formatMoney(cents: number, currency: string, locale = "en"): string {
   return new Intl.NumberFormat(INTL_LOCALE[locale] ?? "en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
+    ...(cents % 100 === 0 ? { minimumFractionDigits: 0, maximumFractionDigits: 0 } : {}),
   }).format(cents / 100);
 }
 
