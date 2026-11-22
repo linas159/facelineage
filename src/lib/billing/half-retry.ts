@@ -4,11 +4,11 @@ import { stripe } from "@/lib/stripe";
 /**
  * Half-amount retry for customers who are short on funds.
  *
- * When a recurring charge (the first post-trial charge or any renewal) has
- * failed twice, and BOTH declines were `insufficient_funds`, we forgive half
- * of the invoice with a credit note. The invoice stays open on the same
- * subscription, so Stripe's next scheduled Smart Retry simply charges the
- * smaller amount — and `invoice.paid` runs exactly as for any renewal.
+ * When a recurring charge (the first post-trial charge or any renewal) is
+ * declined with `insufficient_funds`, we forgive half of the invoice with a
+ * credit note. The invoice stays open on the same subscription, so Stripe's
+ * very next Smart Retry (the 2nd attempt) charges the smaller amount — and
+ * `invoice.paid` runs exactly as for any renewal.
  *
  * Applied at most once per invoice: if the half-amount retry also fails,
  * Stripe keeps retrying the half amount on its normal schedule.
@@ -34,8 +34,14 @@ const MIN_CHARGE: Record<string, number> = {
   uah: 2500,
 };
 
-export async function maybeHalveAfterInsufficientFunds(invoice: Stripe.Invoice): Promise<void> {
-  const tag = `[half-retry] invoice=${invoice.id}`;
+export async function maybeHalveAfterInsufficientFunds(event: Stripe.Invoice): Promise<void> {
+  const tag = `[half-retry] invoice=${event.id}`;
+  if (!event.id) return;
+
+  // Re-fetch through our pinned SDK: the webhook endpoint runs a newer API
+  // version whose invoice payload has no `payment_intent`, and a fresh copy
+  // also reflects any metadata written by a concurrent delivery.
+  const invoice = await stripe.invoices.retrieve(event.id);
 
   if (invoice.billing_reason !== "subscription_cycle") return;
   if (invoice.status !== "open") return;
@@ -57,13 +63,14 @@ export async function maybeHalveAfterInsufficientFunds(invoice: Stripe.Invoice):
     return;
   }
 
-  // Count declines from the PI's charge history rather than
+  // Read declines from the PI's charge history (newest first) rather than
   // `invoice.attempt_count`, which doesn't tick for every decline.
   const charges = await stripe.charges.list({ payment_intent: piId, limit: 100 });
   const failed = charges.data.filter((c) => c.status === "failed");
-  if (failed.length < 2 || !failed.every(isInsufficientFunds)) {
+  const latest = failed[0];
+  if (!latest || !isInsufficientFunds(latest)) {
     console.log(
-      `${tag} failures=${failed.map(declineReason).join(",") || "(none)"} — not 2× insufficient_funds, skipping`,
+      `${tag} failures=${failed.map(declineReason).join(",") || "(none)"} — latest decline not insufficient_funds, skipping`,
     );
     return;
   }

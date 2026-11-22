@@ -154,11 +154,12 @@ export async function POST(req: NextRequest) {
       }
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-        if (invoice.subscription) {
+        const failedSubId = invoiceSubscriptionId(invoice);
+        if (failedSubId) {
           await db
             .from("subscriptions")
             .update({ status: "past_due" })
-            .eq("stripe_subscription_id", invoice.subscription as string);
+            .eq("stripe_subscription_id", failedSubId);
         }
         try {
           await maybeHalveAfterInsufficientFunds(invoice);
@@ -185,14 +186,13 @@ export async function POST(req: NextRequest) {
 // and fires the AI pipeline.
 // ────────────────────────────────────────────────────────────────────────────
 
-async function handleInvoicePaid(
-  invoice: Stripe.Invoice,
-  db: ReturnType<typeof createServiceClient>,
-) {
-  // Resolve subscription id from either the legacy top-level field
-  // (`invoice.subscription`) OR the new `invoice.parent.subscription_details.subscription`
-  // location introduced in API 2024-12-18.acacia. The new flow with
-  // `add_invoice_items` + `default_incomplete` populates only the latter.
+/**
+ * Resolve the subscription id from either the legacy top-level field
+ * (`invoice.subscription`) OR the newer `invoice.parent.subscription_details.subscription`.
+ * Webhook payloads arrive in the endpoint's (newer) API version, which only
+ * populates the latter.
+ */
+function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefined {
   const legacyRef = invoice.subscription;
   // Cast through unknown — TypeScript types for older SDK builds don't
   // know about `parent.subscription_details` yet.
@@ -202,14 +202,18 @@ async function handleInvoicePaid(
     };
   }).parent;
   const newRef = parent?.subscription_details?.subscription ?? null;
-
-  let subscriptionId: string | undefined;
-  if (typeof legacyRef === "string") subscriptionId = legacyRef;
-  else if (legacyRef && typeof legacyRef === "object") subscriptionId = legacyRef.id;
-  if (!subscriptionId) {
-    if (typeof newRef === "string") subscriptionId = newRef;
-    else if (newRef && typeof newRef === "object") subscriptionId = newRef.id;
+  for (const ref of [legacyRef, newRef]) {
+    if (typeof ref === "string") return ref;
+    if (ref && typeof ref === "object") return ref.id;
   }
+  return undefined;
+}
+
+async function handleInvoicePaid(
+  invoice: Stripe.Invoice,
+  db: ReturnType<typeof createServiceClient>,
+) {
+  const subscriptionId = invoiceSubscriptionId(invoice);
 
   console.log(
     `[invoice.paid] invoice=${invoice.id} subscription=${subscriptionId ?? "(none)"} amount_paid=${invoice.amount_paid}`,
