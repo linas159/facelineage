@@ -41,8 +41,9 @@ export const maxDuration = 300;
  *      ↳ kind=upsell      → record purchase, fire upsell pipeline
  *  - customer.subscription.updated/created/deleted → mirror state, and email
  *    the customer a cancellation confirmation when they cancel it themselves
- *  - invoice.payment_failed → past_due; after 2× insufficient_funds on a
- *    renewal, credit half the invoice so the next retry charges 50%
+ *  - invoice.payment_failed → past_due; after an insufficient_funds or
+ *    card_velocity_exceeded decline on a renewal, credit half the invoice
+ *    so the next retry charges 50%
  *    (see @/lib/billing/half-retry)
  *  - charge.refunded → mirror refund onto the purchase (dispute-prevention
  *    lookups read it back; see @/lib/prevent)

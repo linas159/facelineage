@@ -5,8 +5,9 @@ import { stripe } from "@/lib/stripe";
  * Half-amount retry for customers who are short on funds.
  *
  * When a recurring charge (the first post-trial charge or any renewal) is
- * declined with `insufficient_funds`, we forgive half of the invoice with a
- * credit note. The invoice stays open on the same subscription, so Stripe's
+ * declined with `insufficient_funds` (or `card_velocity_exceeded` — the
+ * card's spending limit is hit, same "can't afford it right now"), we
+ * forgive half of the invoice with a credit note. The invoice stays open on the same subscription, so Stripe's
  * very next Smart Retry (the 2nd attempt) charges the smaller amount — and
  * `invoice.paid` runs exactly as for any renewal.
  *
@@ -16,11 +17,10 @@ import { stripe } from "@/lib/stripe";
  * All state lives on Stripe (charge history, credit note, invoice metadata),
  * so out-of-order or duplicate webhook deliveries are safe.
  *
- * Effectively card-only: PayPal/BLIK failures don't report
- * `insufficient_funds`.
+ * Effectively card-only: PayPal/BLIK failures don't report these codes.
  */
 
-const INSUFFICIENT_FUNDS = "insufficient_funds";
+const ELIGIBLE_DECLINES = new Set(["insufficient_funds", "card_velocity_exceeded"]);
 const APPLIED_KEY = "half_retry_applied_at";
 
 // Stripe's minimum charge per currency (minor units), with headroom for the
@@ -68,9 +68,9 @@ export async function maybeHalveAfterInsufficientFunds(event: Stripe.Invoice): P
   const charges = await stripe.charges.list({ payment_intent: piId, limit: 100 });
   const failed = charges.data.filter((c) => c.status === "failed");
   const latest = failed[0];
-  if (!latest || !isInsufficientFunds(latest)) {
+  if (!latest || !isEligibleDecline(latest)) {
     console.log(
-      `${tag} failures=${failed.map(declineReason).join(",") || "(none)"} — latest decline not insufficient_funds, skipping`,
+      `${tag} failures=${failed.map(declineReason).join(",") || "(none)"} — latest decline not eligible, skipping`,
     );
     return;
   }
@@ -94,7 +94,7 @@ export async function maybeHalveAfterInsufficientFunds(event: Stripe.Invoice): P
     {
       invoice: invoice.id,
       amount: credit,
-      memo: "50% courtesy discount after the payment was declined for insufficient funds.",
+      memo: "50% courtesy discount after the payment was declined for insufficient funds or card limit.",
       metadata: { kind: "half_retry", original_amount: String(original) },
     },
     { idempotencyKey: `half-retry-${invoice.id}` },
@@ -117,6 +117,8 @@ function declineReason(c: Stripe.Charge): string {
   return c.outcome?.reason ?? c.failure_code ?? "unknown";
 }
 
-function isInsufficientFunds(c: Stripe.Charge): boolean {
-  return c.outcome?.reason === INSUFFICIENT_FUNDS || c.failure_code === INSUFFICIENT_FUNDS;
+function isEligibleDecline(c: Stripe.Charge): boolean {
+  return (
+    ELIGIBLE_DECLINES.has(c.outcome?.reason ?? "") || ELIGIBLE_DECLINES.has(c.failure_code ?? "")
+  );
 }
